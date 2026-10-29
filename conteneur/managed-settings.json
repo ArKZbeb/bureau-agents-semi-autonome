@@ -1,0 +1,15 @@
+{
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "permissions": {
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "node /opt/hooks/hook-gardien.mjs", "timeout": 90, "onFailure": "block" }]
+      }
+    ]
+  }
+}
