@@ -1,7 +1,7 @@
-import http from 'node:http';
+import http, { type IncomingHttpHeaders } from 'node:http';
 
 export type Tour = { outil?: { nom: string; entree: Record<string, unknown> }; texte?: string; delaiMs?: number };
-export type Requete = { chemin: string; cleApi: string | undefined; corps: any };
+export type Requete = { chemin: string; cleApi: string | undefined; corps: any; entetes: IncomingHttpHeaders };
 export type FausseApi = { url: string; requetes: Requete[]; fermer: () => Promise<void> };
 
 const USAGE = { input_tokens: 100, output_tokens: 50 };
@@ -15,7 +15,7 @@ export async function demarrerFausseApi(tours: Tour[]): Promise<FausseApi> {
     let brut = '';
     for await (const m of req) brut += m;
     const corps = brut ? JSON.parse(brut) : {};
-    requetes.push({ chemin: req.url ?? '', cleApi: req.headers['x-api-key'] as string | undefined, corps });
+    requetes.push({ chemin: req.url ?? '', cleApi: req.headers['x-api-key'] as string | undefined, corps, entetes: req.headers });
     if (req.url?.includes('count_tokens')) {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ input_tokens: 10 }));

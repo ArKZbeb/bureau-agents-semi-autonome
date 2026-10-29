@@ -78,6 +78,13 @@ test('CONNECT sans jeton : 407', async () => {
   m.fermer();
 });
 
+test('CONNECT sans jeton : refus journalisé avant le 407', async () => {
+  const m = await monter();
+  assert.equal((await connect(m.port, 'evil.example:443')).statut, 407);
+  assert.deepEqual(m.refus, [[null, 'evil.example:443']]);
+  m.fermer();
+});
+
 test('proxy HTTP en clair refusé', async () => {
   const m = await monter();
   const statut = await new Promise<number>(r => http.get({ host: '127.0.0.1', port: m.port, path: 'http://example.com/' }, res => r(res.statusCode ?? 0)));

@@ -44,10 +44,15 @@ function compteurUsage(sse: boolean) {
   };
 }
 
+// Seuls ces points d'accès sont relayés ; le reste (lots, fichiers…) n'atteint jamais l'amont.
+const POINTS_AUTORISES = new Set(['/v1/messages', '/v1/messages/count_tokens']);
+
 export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const jeton = (req.headers['x-api-key'] as string | undefined) ?? req.headers.authorization?.replace(/^Bearer /, '');
   const tacheId = deps.jetons.valider(jeton);
   if (!tacheId) return erreurApi(res, 401, 'authentication_error', 'jeton de tâche invalide ou expiré');
+  const chemin = new URL(req.url ?? '/', 'http://proxy.local').pathname;
+  if (req.method !== 'POST' || !POINTS_AUTORISES.has(chemin)) return erreurApi(res, 404, 'not_found_error', 'point d’accès non autorisé');
   const tache = lireTache(deps.db, tacheId);
   if (tache.depenseUsd >= tache.budgetUsd) {
     deps.surBudgetDepasse(tacheId);
@@ -59,25 +64,45 @@ export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: 
   const entetes: Record<string, string> = { 'x-api-key': deps.cleApi, 'accept-encoding': 'identity' };
   for (const n of ENTETES_TRANSMIS) { const v = req.headers[n]; if (typeof v === 'string') entetes[n] = v; }
 
+  const cibleAmont = new URL(req.url ?? '/', deps.urlAmont);
+  if (cibleAmont.origin !== new URL(deps.urlAmont).origin) return erreurApi(res, 502, 'api_error', 'cible amont refusée');
+
   let amont: Response;
   try {
-    amont = await fetch(new URL(req.url ?? '/', deps.urlAmont), {
-      method: req.method, headers: entetes, body: req.method === 'GET' || req.method === 'HEAD' ? undefined : new Uint8Array(corps),
+    amont = await fetch(cibleAmont, {
+      method: req.method, headers: entetes, redirect: 'manual', body: new Uint8Array(corps),
     });
   } catch (e) {
     return erreurApi(res, 502, 'api_error', `API injoignable : ${(e as Error).message}`);
+  }
+  if (amont.status >= 300 && amont.status < 400) {
+    await amont.body?.cancel();
+    return erreurApi(res, 502, 'api_error', 'redirection amont refusée');
   }
 
   const retour: Record<string, string> = {};
   for (const n of ENTETES_RETOUR) { const v = amont.headers.get(n); if (v) retour[n] = v; }
   res.writeHead(amont.status, retour);
   const compteur = compteurUsage((amont.headers.get('content-type') ?? '').includes('event-stream'));
-  if (amont.body) for await (const morceau of amont.body) { res.write(morceau); compteur.ajouter(morceau); }
-  res.end();
+  try {
+    if (amont.body) for await (const morceau of amont.body) { res.write(morceau); compteur.ajouter(morceau); }
+  } catch {
+    // Flux amont coupé : la réponse est close, mais l'usage vu jusqu'ici reste facturé ci-dessous.
+  } finally {
+    res.end();
+    facturer(deps, tacheId, compteur, amont, req.url ?? '');
+  }
+}
 
-  const { usage, modele } = compteur.terminer();
-  if (usage && amont.ok && !(req.url ?? '').includes('count_tokens')) {
-    const t = ajouterDepense(deps.db, tacheId, coutUsd(usage, modele ?? '', deps.tarifs));
-    if (t.depenseUsd >= t.budgetUsd) deps.surBudgetDepasse(tacheId);
+/** Facture l'usage lu, même sur flux interrompu ; une erreur de calcul ne fait pas perdre la réponse. */
+function facturer(deps: DepsProxyApi, tacheId: string, compteur: ReturnType<typeof compteurUsage>, amont: Response, url: string): void {
+  try {
+    const { usage, modele } = compteur.terminer();
+    if (usage && amont.ok && !url.includes('count_tokens')) {
+      const t = ajouterDepense(deps.db, tacheId, coutUsd(usage, modele ?? '', deps.tarifs));
+      if (t.depenseUsd >= t.budgetUsd) deps.surBudgetDepasse(tacheId);
+    }
+  } catch {
+    // ponytail: un échec de facturation est silencieux ; ajouter un journal quand il arrive en pratique
   }
 }
