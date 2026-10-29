@@ -64,4 +64,9 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
 
 ## Commandes
 
-À compléter en phase 1 (installation, build, tests, lancement).
+- Installation : `npm ci` (les scripts npm passent par Git Bash, voir `.npmrc`).
+- Proxy TLS d'entreprise : copier le certificat racine dans `conteneur/certificats/entreprise.crt` (non versionné) et lancer
+  Node avec `NODE_EXTRA_CA_CERTS` pointant vers ce certificat.
+- Image des agents + manifeste signé : `npm run image` (à relancer après toute modification de `agents/` ou `conteneur/`).
+- Tests sans Docker : `npm test` ; types : `npm run typecheck` ; tests avec Docker : `npm run test:docker`.
+- Lancement : `ANTHROPIC_API_KEY=… npm run demarrer` (serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311).
