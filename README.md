@@ -112,3 +112,15 @@ Principe : YAGNI. Ne construis que ce que la phase en cours exige.
 | `docs/superpowers/specs/2026-10-28-bureau-agents-design.md` | Spec complète et validée |
 | `maquette/bureau-des-agents.html` | Maquette de référence : écrans, textes, états, données d'exemple |
 | `maquette/PROMPT-claude-design.md` | Prompt ayant servi à produire la maquette (archive) |
+
+## Commandes
+
+```bash
+npm ci
+cp /chemin/vers/certificat-racine.pem conteneur/certificats/entreprise.crt   # seulement derrière un proxy TLS d'entreprise
+npm run image
+npm test
+npm run typecheck
+npm run test:docker
+ANTHROPIC_API_KEY=... NODE_EXTRA_CA_CERTS=/chemin/vers/certificat-racine.pem npm run demarrer
+```

@@ -1,0 +1,17 @@
+{
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "allowedMcpServers": [],
+  "enableAllProjectMcpServers": false,
+  "permissions": {
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "/usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin BUREAU_JETON=\"$BUREAU_JETON\" /usr/local/bin/node /opt/hooks/hook-gardien.mjs", "timeout": 90, "onFailure": "block" }]
+      }
+    ]
+  }
+}
