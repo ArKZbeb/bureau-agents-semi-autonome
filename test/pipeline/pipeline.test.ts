@@ -155,3 +155,44 @@ test('tâche non prête ou en validation : rien ne se passe', async () => {
   await avancer(deps, 'T-41');
   assert.equal(appels.length, 0);
 });
+
+test('executer qui lève : pause erreur_api journalisée, agent libéré, copie conservée pour la reprise', async () => {
+  const { db, deps, copies } = banc([]);
+  valider(db);
+  deps.executer = async id => { appliquer(db, id, { type: 'demarrage' }); throw new Error('Docker ne répond plus'); };
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.statut, t.agent], ['en_pause', null]);
+  assert.ok(t.raison?.startsWith('erreur_api'));
+  assert.equal(lireJournal(db, 'T-41').at(-1)?.decision, 'Refusé');
+  assert.deepEqual(copies, ['neuve:T-41']);
+});
+
+test('QA : critères signés altérés pendant l’étape = pause d’intégrité', async () => {
+  const { db, deps } = banc([
+    { verdict: 'ok', note: 'Plan sûr.' }, { resume: 'Fait.' }, { rapport: 'RAS.' }, { note: 'Bien.' },
+  ]);
+  valider(db);
+  for (let i = 0; i < 4; i++) await avancer(deps, 'T-41');
+  deps.executer = async id => {
+    db.prepare("UPDATE artefacts SET contenu = '1. Rien' WHERE type = 'criteres'").run();
+    appliquer(db, id, { type: 'demarrage' });
+    return { issue: 'terminee', resultat: '', sortie: { verdict: 'go', criteres: [{ numero: 1, rempli: true, preuve: 'x' }] } };
+  };
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.etape, 'qa');
+  assert.ok(t.raison?.startsWith('integrite'));
+  assert.deepEqual([t.statut, t.agent], ['en_pause', null]);
+});
+
+test('verdictQa : aucun critère signé = no-go (fail-closed)', () => {
+  assert.equal(verdictQa({ verdict: 'go', criteres: [] }, []), 'no_go');
+});
+
+test('étape bloquée par l’exécution : copie supprimée, agent libéré', async () => {
+  const { db, deps, copies } = banc([]);
+  valider(db);
+  deps.executer = async id => { appliquer(db, id, { type: 'demarrage' }); appliquer(db, id, { type: 'bloquee', detail: 'duree' }); return { issue: 'bloquee', raison: 'duree' }; };
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.statut, t.agent], ['bloquee', null]);
+  assert.ok(copies.includes('supprimee:T-41'));
+});

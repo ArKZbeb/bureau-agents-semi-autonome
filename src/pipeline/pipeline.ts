@@ -32,7 +32,7 @@ export const RELAIS: Partial<Record<EtapeAgent, string>> = {
 };
 
 export function verdictQa(sortie: z.infer<typeof SortieQa>, criteres: string[]): 'go' | 'no_go' {
-  if (sortie.verdict !== 'go') return 'no_go';
+  if (sortie.verdict !== 'go' || criteres.length === 0) return 'no_go';
   const remplis = new Set(sortie.criteres.filter(c => c.rempli).map(c => c.numero));
   return criteres.every((_, i) => remplis.has(i + 1)) ? 'go' : 'no_go';
 }
@@ -54,8 +54,10 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
   const def = DEFINITIONS[etape];
 
   let prompt: string;
+  let criteresQa: string[] = [];
   try {
     prompt = promptEtape(db, cle, tache);
+    if (etape === 'qa') criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
     const relais = RELAIS[etape];
     if (relais && tache.reprise === null) {
       const c = await deps.controler({
@@ -65,7 +67,7 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
         journal: lireJournal(db, tacheId).slice(-50).map(e => ({ commande: e.commande, decision: e.decision, raison: e.raison })),
       });
       if (c.coutUsd > 0) ajouterDepense(db, tacheId, c.coutUsd);
-      if (c.verdict === 'signaler') return signaler(deps, tacheId, 'integrite', `contrôleur d’intégrité : ${c.constats.join(' ; ')}`);
+      if (c.verdict === 'signaler') return signaler(deps, tacheId, 'integrite', `contrôleur d’intégrité : ${(c.constats.join(' ; ') || 'signalement sans détail')}`);
       if (c.verdict === 'indisponible') return signaler(deps, tacheId, 'erreur_api', c.constats.join(' ; ') || 'contrôleur d’intégrité indisponible');
     }
   } catch (e) {
@@ -74,76 +76,89 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
   }
 
   definirAgent(db, tacheId, def.agent);
-  const volume = def.espace === 'copie' ? await deps.copie(tacheId, tache.reprise === null) : undefined;
-  const fin = async (t: Tache): Promise<Tache> => {
-    if (volume && t.statut !== 'en_pause') await deps.supprimerCopie(tacheId);
+  let volume: string | undefined;
+  const fin = async (): Promise<Tache> => {
+    if (volume && lireTache(db, tacheId).statut !== 'en_pause') await deps.supprimerCopie(tacheId);
     definirAgent(db, tacheId, null);
     return lireTache(db, tacheId);
   };
+  try {
+    volume = def.espace === 'copie' ? await deps.copie(tacheId, tache.reprise === null) : undefined;
+    const r = await deps.executer(tacheId, agentPour(etape, deps.config, deps.racineDepot), prompt, { volume });
+    if (r.issue !== 'terminee') return fin();
 
-  const r = await deps.executer(tacheId, agentPour(etape, deps.config, deps.racineDepot), prompt, { volume });
-  if (r.issue !== 'terminee') return fin(lireTache(db, tacheId));
-
-  const illisible = () => appliquer(db, tacheId, { type: 'bloquee', detail: 'sortie de l’agent illisible : étape à relancer' });
-  const lire = <T>(s: z.ZodType<T>) => lireSortie(s, r.sortie);
-  let t: Tache;
-  switch (etape) {
-    case 'cadrage': {
-      const s = lire(SortieCadreur);
-      if (!s) { t = illisible(); break; }
-      if (s.type === 'questions') {
-        ajouterEchange(db, tacheId, 'cadreur', (s.questions ?? []).join('\n'));
-        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: 'questions' });
-      } else {
-        // Copie non signée des fichiers du cadreur : c'est elle que je valide, jamais une relecture du workspace.
-        const spec = (await deps.lireFichier(tacheId, '/workspace/cadrage/spec.md'))?.trim() ?? '';
-        const plan = (await deps.lireFichier(tacheId, '/workspace/cadrage/plan.md'))?.trim() ?? '';
-        const criteres = extraireCriteres(spec);
-        if (!spec || !plan || !criteres.length) {
-          t = appliquer(db, tacheId, { type: 'bloquee', detail: 'documents du cadreur incomplets : spec.md avec critères numérotés et plan.md attendus' });
-          break;
+    const illisible = () => appliquer(db, tacheId, { type: 'bloquee', detail: 'sortie de l’agent illisible : étape à relancer' });
+    const lire = <T>(s: z.ZodType<T>) => lireSortie(s, r.sortie);
+    let t: Tache;
+    switch (etape) {
+      case 'cadrage': {
+        const s = lire(SortieCadreur);
+        if (!s) { t = illisible(); break; }
+        if (s.type === 'questions') {
+          ajouterEchange(db, tacheId, 'cadreur', (s.questions ?? []).join('\n'));
+          t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: 'questions' });
+        } else {
+          // Copie non signée des fichiers du cadreur : c'est elle que je valide, jamais une relecture du workspace.
+          const spec = (await deps.lireFichier(tacheId, '/workspace/cadrage/spec.md'))?.trim() ?? '';
+          const plan = (await deps.lireFichier(tacheId, '/workspace/cadrage/plan.md'))?.trim() ?? '';
+          const criteres = extraireCriteres(spec);
+          if (!spec || !plan || !criteres.length) {
+            t = appliquer(db, tacheId, { type: 'bloquee', detail: 'documents du cadreur incomplets : spec.md avec critères numérotés et plan.md attendus' });
+            break;
+          }
+          enregistrerProposition(db, tacheId, { spec: `${spec}\n`, criteres, plan: `${plan}\n` });
+          t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: 'proposition' });
         }
-        enregistrerProposition(db, tacheId, { spec: `${spec}\n`, criteres, plan: `${plan}\n` });
-        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: 'proposition' });
+        break;
       }
-      break;
+      case 'patron_plan': {
+        const s = lire(SortiePatronPlan);
+        if (!s) { t = illisible(); break; }
+        enregistrerArtefact(db, cle, tacheId, 'avis_patron', s.note);
+        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: s.verdict });
+        break;
+      }
+      case 'implementation': {
+        const s = lire(SortieImplementeur);
+        if (!s) { t = illisible(); break; }
+        enregistrerArtefact(db, cle, tacheId, 'resume', s.resume);
+        t = appliquer(db, tacheId, { type: 'etape_terminee' });
+        break;
+      }
+      case 'review': {
+        const s = lire(SortieReviewer);
+        if (!s) { t = illisible(); break; }
+        enregistrerArtefact(db, cle, tacheId, 'rapport', s.rapport);
+        t = appliquer(db, tacheId, { type: 'etape_terminee' });
+        break;
+      }
+      case 'patron_code': {
+        const s = lire(SortiePatronCode);
+        if (!s) { t = illisible(); break; }
+        enregistrerArtefact(db, cle, tacheId, 'avis_patron_code', s.note);
+        t = appliquer(db, tacheId, { type: 'etape_terminee' });
+        break;
+      }
+      case 'qa': {
+        const s = lire(SortieQa);
+        if (!s) { t = illisible(); break; }
+        // Relecture vérifiée après l'agent : une altération pendant l'étape lève AnomalieIntegrite (pause, via le catch).
+        criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
+        enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify(s, null, 2));
+            t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: verdictQa(s, criteresQa) });
+        break;
+      }
     }
-    case 'patron_plan': {
-      const s = lire(SortiePatronPlan);
-      if (!s) { t = illisible(); break; }
-      enregistrerArtefact(db, cle, tacheId, 'avis_patron', s.note);
-      t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: s.verdict });
-      break;
+    return fin();
+
+  } catch (e) {
+    const courante = lireTache(db, tacheId);
+    if (courante.statut === 'en_cours' || courante.statut === 'prete') {
+      if (e instanceof AnomalieIntegrite) signaler(deps, tacheId, 'integrite', e.message);
+      else signaler(deps, tacheId, 'erreur_api', (e instanceof Error ? e.message : String(e)).slice(0, 200));
     }
-    case 'implementation': {
-      const s = lire(SortieImplementeur);
-      if (!s) { t = illisible(); break; }
-      enregistrerArtefact(db, cle, tacheId, 'resume', s.resume);
-      t = appliquer(db, tacheId, { type: 'etape_terminee' });
-      break;
-    }
-    case 'review': {
-      const s = lire(SortieReviewer);
-      if (!s) { t = illisible(); break; }
-      enregistrerArtefact(db, cle, tacheId, 'rapport', s.rapport);
-      t = appliquer(db, tacheId, { type: 'etape_terminee' });
-      break;
-    }
-    case 'patron_code': {
-      const s = lire(SortiePatronCode);
-      if (!s) { t = illisible(); break; }
-      enregistrerArtefact(db, cle, tacheId, 'avis_patron_code', s.note);
-      t = appliquer(db, tacheId, { type: 'etape_terminee' });
-      break;
-    }
-    case 'qa': {
-      const s = lire(SortieQa);
-      if (!s) { t = illisible(); break; }
-      enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify(s, null, 2));
-      const criteres = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
-      t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: verdictQa(s, criteres) });
-      break;
-    }
+    return await fin();
+  } finally {
+    definirAgent(db, tacheId, null);
   }
-  return fin(t);
 }
