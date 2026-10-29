@@ -8,6 +8,7 @@ import Docker from 'dockerode';
 import { construireImage } from '../src/conteneurs/image.ts';
 import {
   arreterConteneurs, assurerPasserelle, creerConteneurAgent, executerDans, lireFichierConteneur, lireFichierVolume,
+  resoudreCheminConteneur, resoudreCheminVolume,
   fichierParametresVides, nomRessource, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
 
@@ -80,5 +81,12 @@ test('conteneur durci : non root, racine en lecture seule, sans capacité, sans 
   assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/f`), null, 'FIFO refusée');
   assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/lien`), null, 'lien symbolique refusé (volume)');
   assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/f`), null, 'FIFO refusée (volume)');
+  assert.equal((await sh('mkdir -p /workspace/projet/src && ln -s ../.git/hooks/pre-commit /workspace/projet/src/x')).code, 0);
+  for (const resoudre of [(p: string) => resoudreCheminConteneur(c, p), (p: string) => resoudreCheminVolume(docker, image, nomRessource(T), p)]) {
+    assert.equal(await resoudre(`${RACINE_PROJET}/src/x`), `${RACINE_PROJET}/.git/hooks/pre-commit`, 'lien vers les hooks Git résolu');
+    assert.equal(await resoudre(`${RACINE_PROJET}/lien`), '/etc/passwd');
+    assert.equal(await resoudre(`${RACINE_PROJET}/README.md`), `${RACINE_PROJET}/README.md`, 'fichier normal inchangé');
+    assert.equal(await resoudre(`${RACINE_PROJET}/src/nouveau.ts`), `${RACINE_PROJET}/src/nouveau.ts`, 'fichier à créer : chemin normalisé');
+  }
   assert.equal(await arreterConteneurs(docker, T), 1);
 });

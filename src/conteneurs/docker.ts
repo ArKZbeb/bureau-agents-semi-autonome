@@ -143,6 +143,18 @@ export async function lireFichierVolume(docker: Docker, imageId: string, volume:
   return r.code === 0 ? r.stdout.toString('utf8') : null;
 }
 
+// readlink -m : résout tous les liens, même si la cible finale n'existe pas encore (fichier à créer).
+const commandeResolution = (chemin: string) => ['readlink', '-m', '--', chemin];
+const cheminResolu = (code: number, sortie: Buffer): string | null => {
+  const s = sortie.toString('utf8');
+  return code === 0 && s.startsWith('/') && s.endsWith('\n') ? s.slice(0, -1) : null;
+};
+
+export async function resoudreCheminVolume(docker: Docker, imageId: string, volume: string, chemin: string): Promise<string | null> {
+  const r = await executerJetable(docker, imageId, commandeResolution(chemin), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  return cheminResolu(r.code, r.stdout);
+}
+
 export async function creerConteneurAgent(
   docker: Docker,
   o: { tacheId: string; imageId: string; reseau: string; volume: string; env: string[]; ressources: Ressources; parametresVides: string },
@@ -191,6 +203,15 @@ export async function lireFichierConteneur(conteneur: Docker.Container, chemin: 
     new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
   ]);
   return r && r.code === 0 ? Buffer.concat(morceaux).toString('utf8') : null;
+}
+
+export async function resoudreCheminConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {
+  const morceaux: Buffer[] = [];
+  const r = await Promise.race([
+    executerDans(conteneur, commandeResolution(chemin), m => morceaux.push(m)),
+    new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
+  ]);
+  return r ? cheminResolu(r.code, Buffer.concat(morceaux)) : null;
 }
 
 export async function arreterConteneurs(docker: Docker, tacheId?: string): Promise<number> {

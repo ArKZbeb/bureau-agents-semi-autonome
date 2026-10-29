@@ -19,6 +19,8 @@ export type SortieHook = {
 export type DepsGardien = {
   db: Base; cle: Buffer;
   lireFichier: (tacheId: string, chemin: string) => Promise<string | null>;
+  /** Chemin absolu après résolution des liens symboliques dans l'espace de la tâche ; null si impossible. */
+  resoudreChemin: (tacheId: string, chemin: string) => Promise<string | null>;
   avis: (demande: DemandeAvis) => Promise<Avis>;
   fiche: (d: Dependance) => Promise<Fiche>;
   surEscalade: (tacheId: string) => void;
@@ -129,6 +131,20 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   }
   const ctx: Contexte = { tacheId, titre: tache.titre, plan, zones: zonesDuPlan(plan) };
 
+  // Un lien du dépôt (src/x → ../.git/hooks/pre-commit) ne doit pas déguiser la cible réelle.
+  const ecriture = OUTILS_ECRITURE.has(outil);
+  const demande = path.posix.resolve(RACINE, String(ecriture ? entree.file_path : entree.file_path ?? entree.path ?? RACINE));
+  let cible = demande;
+  if (ecriture || OUTILS_LECTURE.has(outil)) {
+    const resolu = await deps.resoudreChemin(tacheId, demande);
+    if (resolu === null) return refusListe('chemin impossible à résoudre');
+    if (ecriture && resolu !== demande) {
+      const v = evaluerFichier(resolu, 'ecriture', RACINE, ctx.zones);
+      return v.decision === 'Refusé' ? depuis(v) : refusListe('écriture via un lien symbolique');
+    }
+    cible = resolu;
+  }
+
   const empreinte = await empreinteEffective(deps, tacheId, outil, entree);
   const auto = deps.db.prepare('SELECT decision FROM autorisations WHERE tache_id = ? AND empreinte_appel = ? AND utilisee = 0').get(tacheId, empreinte) as { decision: 'allow' | 'deny' } | undefined;
   if (auto) {
@@ -146,7 +162,10 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
     if (cibles.some(v => SECRETS_MOTIF.test(v))) return refusListe('accès à des fichiers de secrets');
     if (globs.some(g => g.startsWith('/') || g.startsWith('~') || g.includes('..'))) return refusListe('lecture hors du projet');
   }
-  if (OUTILS_LECTURE.has(outil)) return depuis(evaluerFichier(String(entree.file_path ?? entree.path ?? RACINE), 'lecture', RACINE, ctx.zones));
+  if (OUTILS_LECTURE.has(outil)) {
+    const v = evaluerFichier(demande, 'lecture', RACINE, ctx.zones);
+    return depuis(v.decision !== 'Autorisé' || cible === demande ? v : evaluerFichier(cible, 'lecture', RACINE, ctx.zones));
+  }
   if (OUTILS_INTERNES.has(outil)) return { decision: 'Autorisé', decideur: 'Liste blanche', couche: '2', raison: 'outil interne de l’agent' };
   if (outil === 'WebFetch' || outil === 'WebSearch') return refusListe('accès web interdit');
   return refusListe(`outil non prévu : ${outil}`);

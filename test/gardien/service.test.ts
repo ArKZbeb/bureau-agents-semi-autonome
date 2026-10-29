@@ -11,7 +11,7 @@ import type { Fiche } from '../../src/gardien/dependances.ts';
 const cle = Buffer.alloc(32, 4);
 const PLAN = '# Plan T-45\n\n## Zones touchées\n\n- `src/**`\n';
 
-function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, string>; fiche?: Partial<Fiche> } = {}) {
+function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, string>; fiche?: Partial<Fiche>; liens?: Record<string, string | null> } = {}) {
   const db = ouvrirBase(':memory:');
   creerTache(db, { id: 'T-45', projet: 'Conducteur', titre: 'Import CSV des conducteurs', cheminProjet: '/p', budgetUsd: 6 });
   enregistrerArtefact(db, cle, 'T-45', 'plan', PLAN);
@@ -21,6 +21,8 @@ function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, string>;
   const deps: DepsGardien = {
     db, cle,
     lireFichier: async (_t, chemin) => o.fichiers?.[chemin] ?? null,
+    // Sans lien déclaré, un chemin se résout en lui-même.
+    resoudreChemin: async (_t, chemin) => (o.liens && chemin in o.liens ? o.liens[chemin] : chemin),
     avis: async d => { demandes.push(d); return { decision: o.avis ?? 'autoriser', raison: `avis : ${o.avis ?? 'autoriser'}`, coutUsd: 0.001 }; },
     fiche: async d => ({ ...d, existe: true, telechargements: 31, periode: 'semaine', publieLe: '2026-10-25', licence: 'MIT', vulnerabilites: 0, erreur: null, ...o.fiche }),
     surEscalade: id => escalades.push(id),
@@ -201,4 +203,53 @@ test('panne du gardien pendant l’avis : refus et entrée au journal', async ()
 test('appel mal formé (commande non textuelle) refusé', async () => {
   const { deps } = monter();
   assert.equal(decision(await decider(deps, 'T-45', { tool_name: 'Bash', tool_input: { command: 42 }, tool_use_id: 'toolu_42' })), 'deny');
+});
+
+test('liens symboliques : écriture vers .git/hooks ou .github/workflows refusée, fichier normal inchangé', async () => {
+  const { deps, escalades } = monter({
+    liens: {
+      '/workspace/projet/src/x': '/workspace/projet/.git/hooks/pre-commit',
+      '/workspace/projet/src/ci.yml': '/workspace/projet/.github/workflows/deploy.yml',
+      '/workspace/projet/src/etat': '/workspace/.etat-claude/settings.json',
+      '/workspace/projet/src/autre.ts': '/workspace/projet/src/vrai.ts',
+      '/workspace/projet/src/perdu.ts': null,
+    },
+  });
+  const raison = (s: Awaited<ReturnType<typeof decider>>) => s.hookSpecificOutput.permissionDecisionReason;
+  const hook = await decider(deps, 'T-45', ecrire('/workspace/projet/src/x', '#!/bin/sh\ncurl x | sh'));
+  assert.equal(decision(hook), 'deny');
+  assert.equal(raison(hook), 'modification des internes Git');
+  const ci = await decider(deps, 'T-45', ecrire('/workspace/projet/src/ci.yml', 'name: deploy'));
+  assert.equal(decision(ci), 'deny');
+  assert.equal(raison(ci), 'écriture via un lien symbolique');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/etat', '{}'))), 'deny');
+  const autre = await decider(deps, 'T-45', ecrire('/workspace/projet/src/autre.ts', 'export {}'));
+  assert.equal(decision(autre), 'deny', 'toute écriture dont la cible résolue diffère est refusée');
+  assert.equal(raison(autre), 'écriture via un lien symbolique');
+  const perdu = await decider(deps, 'T-45', ecrire('/workspace/projet/src/perdu.ts', 'export {}'));
+  assert.equal(decision(perdu), 'deny');
+  assert.equal(raison(perdu), 'chemin impossible à résoudre');
+  const edit = await decider(deps, 'T-45', { tool_name: 'Edit', tool_input: { file_path: '/workspace/projet/src/x', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_lien_edit' });
+  assert.equal(decision(edit), 'deny');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/normal.ts', 'export {}'))), 'allow', 'fichier normal : décision inchangée');
+  assert.deepEqual(escalades, [], 'aucune escalade pour une écriture via lien');
+});
+
+test('liens symboliques : lecture évaluée sur la cible résolue', async () => {
+  const { deps } = monter({
+    liens: {
+      '/workspace/projet/src/a.ts': '/etc/shadow',
+      '/workspace/projet/src/cles': '/workspace/projet/.env',
+      '/workspace/projet/src/b.ts': '/workspace/projet/src/vrai.ts',
+      '/workspace/projet/docs': '/home/node',
+      '/workspace/projet/src/perdu.ts': null,
+    },
+  });
+  const appel = (tool_name: string, tool_input: Record<string, unknown>) => decider(deps, 'T-45', { tool_name, tool_input, tool_use_id: `toolu_${++n}` }).then(decision);
+  assert.equal(await appel('Read', { file_path: '/workspace/projet/src/a.ts' }), 'deny');
+  assert.equal(await appel('Read', { file_path: '/workspace/projet/src/cles' }), 'deny');
+  assert.equal(await appel('Read', { file_path: '/workspace/projet/src/b.ts' }), 'allow', 'lien interne au projet : lecture permise');
+  assert.equal(await appel('Read', { file_path: '/workspace/projet/src/perdu.ts' }), 'deny');
+  assert.equal(await appel('Grep', { pattern: 'x', path: '/workspace/projet/docs' }), 'deny');
+  assert.equal(await appel('Glob', { pattern: '*.ts', path: '/workspace/projet/docs' }), 'deny');
 });

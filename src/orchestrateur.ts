@@ -7,7 +7,8 @@ import type http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config.ts';
 import {
-  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireFichierVolume, nomRessource, preparerEspace, verifierDocker, verifierImage,
+  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireFichierVolume, nomRessource, preparerEspace, resoudreCheminConteneur, resoudreCheminVolume,
+  verifierDocker, verifierImage,
 } from './conteneurs/docker.ts';
 import { lancerEtape, type Agent, type DepsExecution, type ResultatEtape } from './conteneurs/execution.ts';
 import { ouvrirBase, type Base } from './db.ts';
@@ -70,6 +71,10 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     lireFichier: (tacheId, chemin) => {
       const c = enCours.get(tacheId);
       return c ? lireFichierConteneur(c, chemin) : lireFichierVolume(docker, manifeste.image, nomRessource(tacheId), chemin);
+    },
+    resoudreChemin: (tacheId, chemin) => {
+      const c = enCours.get(tacheId);
+      return c ? resoudreCheminConteneur(c, chemin) : resoudreCheminVolume(docker, manifeste.image, nomRessource(tacheId), chemin);
     },
     avis: d => (client
       ? demanderAvis(client, optionsAvis, d)
