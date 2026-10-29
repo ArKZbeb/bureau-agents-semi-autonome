@@ -70,6 +70,8 @@ test('conteneur durci : non root, racine en lecture seule, sans capacité, sans 
   assert.notEqual((await sh('echo {} > /etc/claude-code/managed-settings.json')).code, 0);
   assert.notEqual((await sh('echo x > /opt/hooks/hook-gardien.mjs')).code, 0);
   assert.equal((await sh('touch /workspace/projet/ok && echo oui')).sortie, 'oui');
+  assert.equal((await sh('npm config get cache')).sortie, '/tmp/.npm', 'cache npm hors de la racine en lecture seule');
+  assert.equal((await sh('npm cache verify > /dev/null 2>&1 && echo oui')).sortie, 'oui', 'cache npm inscriptible');
   assert.equal((await sh('test -e /var/run/docker.sock && echo present || echo absent')).sortie, 'absent');
   assert.match((await sh(`node -e "fetch('https://registry.npmjs.org',{signal:AbortSignal.timeout(5000)}).then(()=>console.log('OUVERT'),()=>console.log('BLOQUE'))"`)).sortie, /BLOQUE/);
   assert.notEqual((await sh(`echo '{"env":{"X":"1"}}' > /workspace/.etat-claude/settings.json`)).code, 0);

@@ -17,6 +17,7 @@ RUN mkdir -p /workspace && chown node:node /workspace
 ENV CLAUDE_CONFIG_DIR=/workspace/.etat-claude \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     DISABLE_AUTOUPDATER=1 \
-    NPM_CONFIG_IGNORE_SCRIPTS=true
+    NPM_CONFIG_IGNORE_SCRIPTS=true \
+    npm_config_cache=/tmp/.npm
 USER node
 WORKDIR /workspace
