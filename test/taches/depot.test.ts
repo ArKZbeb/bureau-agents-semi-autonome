@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ouvrirBase } from '../../src/db.ts';
-import { creerTache, lireTache, listerTaches, appliquer, definirReprise, ajouterDepense, augmenterBudget, reprendreApresRedemarrage } from '../../src/taches/depot.ts';
+import { creerTache, lireTache, listerTaches, appliquer, definirReprise, ajouterDepense, augmenterBudget, reprendreApresRedemarrage, definirAgent } from '../../src/taches/depot.ts';
 
 const T41 = { id: 'T-41', projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: 'C:/dev/film', budgetUsd: 6 };
 
@@ -55,4 +55,14 @@ test('reprise après redémarrage : la reprise de session est effacée, l’éta
   assert.deepEqual(reprendreApresRedemarrage(db), ['T-41']);
   assert.equal(lireTache(db, 'T-41').statut, 'prete');
   assert.equal(lireTache(db, 'T-41').reprise, null);
+});
+
+test('agent courant enregistré puis effacé', () => {
+  const db = ouvrirBase(':memory:');
+  creerTache(db, T41);
+  assert.equal(lireTache(db, 'T-41').agent, null);
+  definirAgent(db, 'T-41', 'reviewer');
+  assert.equal(lireTache(db, 'T-41').agent, 'reviewer');
+  definirAgent(db, 'T-41', null);
+  assert.equal(lireTache(db, 'T-41').agent, null);
 });

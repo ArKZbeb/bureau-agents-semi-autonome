@@ -2,7 +2,7 @@ import { enTransaction, type Base } from '../db.ts';
 import { AnomalieIntegrite } from './anomalie.ts';
 import { hmac, hmacValide, sha256 } from './signature.ts';
 
-export type TypeArtefact = 'spec' | 'plan' | 'criteres' | 'rapport' | 'verdict';
+export type TypeArtefact = 'spec' | 'plan' | 'criteres' | 'rapport' | 'verdict' | 'demande' | 'avis_patron' | 'resume' | 'avis_patron_code';
 export type Artefact = { id: number; tacheId: string; type: TypeArtefact; contenu: string; sha256: string; creeLe: string };
 
 type Ligne = { id: number; tache_id: string; type: TypeArtefact; contenu: string; sha256: string; hmac: string; cree_le: string };
