@@ -9,7 +9,7 @@ import { construireImage } from '../src/conteneurs/image.ts';
 import {
   arreterConteneurs, assurerPasserelle, creerConteneurAgent, executerDans, lireFichierConteneur, lireFichierVolume,
   resoudreCheminConteneur, resoudreCheminVolume,
-  fichierParametresVides, nomRessource, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
+  fichierParametresVides, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
 
 const docker = new Docker();
@@ -91,4 +91,35 @@ test('conteneur durci : non root, racine en lecture seule, sans capacité, sans 
     assert.equal(await resoudre(`${RACINE_PROJET}/src/nouveau.ts`), `${RACINE_PROJET}/src/nouveau.ts`, 'fichier à créer : chemin normalisé');
   }
   assert.equal(await arreterConteneurs(docker, T), 1);
+});
+
+async function executerSurVolume(volume: string, script: string): Promise<void> {
+  const c = await docker.createContainer({ Image: image, User: 'node', Cmd: ['sh', '-c', script], HostConfig: { NetworkMode: 'none', Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace' }] } });
+  await c.start();
+  await c.wait();
+  await c.remove({ force: true });
+}
+
+test('copie de contrôle : branche committée seulement, modifications jetées', async () => {
+  const id = `T-CTRL-${Date.now()}`;
+  try {
+    await preparerEspace(docker, image, id, depot);
+    await executerSurVolume(nomRessource(id), 'echo x > /workspace/cadrage/spec.md');
+    assert.equal(await lireFichierVolume(docker, image, nomRessource(id), '/workspace/cadrage/spec.md'), 'x\n');
+    // Fichier non commité dans l'espace de la tâche : absent de la copie.
+    await executerSurVolume(nomRessource(id), `echo brouillon > ${RACINE_PROJET}/brouillon.txt`);
+    const copie = await preparerCopieControle(docker, image, id);
+    assert.equal(copie, nomCopie(id));
+    assert.equal(await lireFichierVolume(docker, image, copie, `${RACINE_PROJET}/brouillon.txt`), null);
+    assert.notEqual(await lireFichierVolume(docker, image, copie, `${RACINE_PROJET}/README.md`), null);
+    // Écriture dans la copie : sans effet sur la branche.
+    await executerSurVolume(copie, `echo modifie > ${RACINE_PROJET}/README.md`);
+    assert.notEqual(await lireFichierVolume(docker, image, nomRessource(id), `${RACINE_PROJET}/README.md`), 'modifie\n');
+    await supprimerCopieControle(docker, id);
+    await assert.rejects(docker.getVolume(copie).inspect());
+    await supprimerCopieControle(docker, id);
+  } finally {
+    await supprimerCopieControle(docker, id).catch(() => {});
+    await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
+  }
 });

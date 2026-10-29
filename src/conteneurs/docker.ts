@@ -6,6 +6,8 @@ import { AnomalieIntegrite } from '../integrite/anomalie.ts';
 
 export const RACINE_PROJET = '/workspace/projet';
 export const DOSSIER_ETAT = '/workspace/.etat-claude';
+/** Documents du cadreur (spec, plan), hors du dépôt git. */
+export const DOSSIER_CADRAGE = '/workspace/cadrage';
 export const PORT_INTERNE_PASSERELLE = 4311;
 export const NOM_PASSERELLE = 'bureau-passerelle';
 export const LABEL_TACHE = 'bureau.tache';
@@ -17,6 +19,8 @@ export type Ressources = { memoire: number; cpus: number; pids: number };
 const DURCISSEMENT = { ReadonlyRootfs: true, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], Privileged: false, Init: true };
 
 export const nomRessource = (tacheId: string) => `bureau-${tacheId.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+export const brancheTache = (tacheId: string) => `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
+export const nomCopie = (tacheId: string) => `${nomRessource(tacheId)}-controle`;
 const codeHttp = (e: unknown) => (e as { statusCode?: number }).statusCode;
 
 export async function verifierDocker(docker: Docker): Promise<void> {
@@ -110,7 +114,7 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
   const existe = await docker.getVolume(volume).inspect().then(() => true, (e: unknown) => { if (codeHttp(e) === 404) return false; throw e; });
   if (existe) throw new Error(`l’espace de ${tacheId} existe déjà`);
   await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
-  const branche = `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
+  const branche = brancheTache(tacheId);
   const script = [
     // La source montée appartient à un autre uid : exception déclarée dans un HOME jetable (-c n'est pas honoré par git clone).
     'export HOME=/tmp',
@@ -120,7 +124,7 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
     `git checkout --quiet -b ${branche}`,
     `git config user.name "Bureau d'agents"`,
     'git config user.email bureau@localhost',
-    `mkdir -p ${DOSSIER_ETAT}`,
+    `mkdir -p ${DOSSIER_ETAT} ${DOSSIER_CADRAGE}`,
   ].join(' && ');
   const r = await executerJetable(docker, imageId, ['sh', '-c', script], [
     { Type: 'volume', Source: volume, Target: '/workspace' },
@@ -226,4 +230,33 @@ export function fichierParametresVides(dossierDonnees: string): string {
   fs.mkdirSync(path.dirname(fichier), { recursive: true });
   if (!fs.existsSync(fichier)) fs.writeFileSync(fichier, '{}');
   return fichier;
+}
+
+/** Volume jetable cloné depuis la branche : les agents en lecture seule y compilent et testent sans toucher à la branche. */
+export async function preparerCopieControle(docker: Docker, imageId: string, tacheId: string): Promise<string> {
+  const volume = nomCopie(tacheId);
+  await supprimerCopieControle(docker, tacheId);
+  await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
+  const script = [
+    'export HOME=/tmp',
+    `git config --global --add safe.directory '*'`,
+    `git clone --quiet --no-hardlinks --branch ${brancheTache(tacheId)} /source/projet ${RACINE_PROJET}`,
+    `cd ${RACINE_PROJET}`,
+    `git config user.name "Bureau d'agents"`,
+    'git config user.email bureau@localhost',
+    `mkdir -p ${DOSSIER_ETAT}`,
+  ].join(' && ');
+  const r = await executerJetable(docker, imageId, ['sh', '-c', script], [
+    { Type: 'volume', Source: volume, Target: '/workspace' },
+    { Type: 'volume', Source: nomRessource(tacheId), Target: '/source', ReadOnly: true },
+  ]);
+  if (r.code !== 0) {
+    await supprimerCopieControle(docker, tacheId);
+    throw new Error(`copie de contrôle de ${tacheId} impossible : ${r.stderr.toString('utf8').slice(-500)}`);
+  }
+  return volume;
+}
+
+export async function supprimerCopieControle(docker: Docker, tacheId: string): Promise<void> {
+  await docker.getVolume(nomCopie(tacheId)).remove({ force: true }).catch((e: unknown) => { if (codeHttp(e) !== 404) throw e; });
 }
