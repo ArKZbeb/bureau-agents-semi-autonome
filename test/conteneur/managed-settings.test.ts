@@ -22,3 +22,8 @@ test('hook gardien sur tous les outils, bloquant en cas d’échec', () => {
   assert.ok(entree.hooks[0].command.startsWith('/usr/bin/env -i '));
   assert.ok(!entree.hooks[0].command.includes('BUREAU_URL_GARDIEN'));
 });
+
+test('aucun serveur MCP autorisé, ceux du projet jamais activés', () => {
+  assert.deepEqual(s.allowedMcpServers, []);
+  assert.equal(s.enableAllProjectMcpServers, false);
+});

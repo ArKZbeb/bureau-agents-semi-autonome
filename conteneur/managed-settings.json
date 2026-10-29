@@ -1,6 +1,8 @@
 {
   "allowManagedPermissionRulesOnly": true,
   "allowManagedHooksOnly": true,
+  "allowedMcpServers": [],
+  "enableAllProjectMcpServers": false,
   "permissions": {
     "disableBypassPermissionsMode": "disable"
   },

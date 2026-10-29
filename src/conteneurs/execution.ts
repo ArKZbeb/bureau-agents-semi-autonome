@@ -73,7 +73,9 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
   if (!r) args.push(prompt.trimStart().startsWith('-') ? `Consigne : ${prompt}` : prompt);
   else if (r.mode === 'message') args.push(r.message ?? messageEscalade(deps.db, tacheId));
   args.push('--output-format', 'stream-json', '--verbose', '--model', agent.modele, '--max-turns', String(agent.maxTours),
-    '--permission-mode', 'default', '--append-system-prompt', agent.promptSysteme);
+    '--permission-mode', 'default', '--append-system-prompt', agent.promptSysteme,
+    // Réglages et serveurs MCP du dépôt ignorés : seuls comptent les managed settings et le fichier utilisateur vide.
+    '--setting-sources', 'user', '--strict-mcp-config');
   if (r) args.push('--resume', r.sessionId);
 
   appliquer(deps.db, tacheId, { type: 'demarrage' });
