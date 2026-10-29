@@ -37,3 +37,22 @@ for (const [nom, impl] of [
     assert.match(avis.raison, /refus par défaut/);
   });
 }
+
+test('fail-closed : appel qui lève de façon synchrone', async () => {
+  const avis = await demanderAvis(client(() => { throw new Error('boum'); }), options, demande);
+  assert.equal(avis.decision, 'refuser');
+  assert.match(avis.raison, /refus par défaut/);
+});
+
+test('fail-closed : sérialisation impossible (référence circulaire)', async () => {
+  const circulaire: any = { tache: { id: 'T-1', titre: 'x' }, plan: null, appel: { outil: 'Bash', entree: null }, motif: 'm', fiches: [], contenus: {} };
+  circulaire.contenus.self = circulaire;
+  const avis = await demanderAvis(client(async () => { throw new Error('ne doit pas être appelé'); }), options, circulaire);
+  assert.equal(avis.decision, 'refuser');
+  assert.match(avis.raison, /refus par défaut/);
+});
+
+test('réponse sans usage : pas de plantage, coût nul', async () => {
+  const avis = await demanderAvis(client(async () => ({ parsed_output: { decision: 'autoriser', raison: 'rien à signaler' }, stop_reason: 'end_turn' })), options, demande);
+  assert.deepEqual(avis, { decision: 'autoriser', raison: 'rien à signaler', coutUsd: 0 });
+});
