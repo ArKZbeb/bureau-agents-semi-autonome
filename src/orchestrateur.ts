@@ -110,7 +110,11 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`,
     creerTache: async t => {
       const tache = creerTache(db, t);
-      await preparerEspace(docker, manifeste.image, t.id, t.cheminProjet);
+      try { await preparerEspace(docker, manifeste.image, t.id, t.cheminProjet); } catch (err) {
+        appliquer(db, t.id, { type: 'abandon' });
+        journaliser({ tacheId: t.id, type: 'evenement', commande: 'préparation impossible', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (err as Error).message.slice(0, 200) });
+        throw err;
+      }
       journaliser({ tacheId: t.id, type: 'evenement', commande: `git clone ${t.cheminProjet} ${t.id}`, couche: '—', decision: 'Autorisé', decideur: 'Orchestrateur', raison: 'préparation du conteneur' });
       return tache;
     },

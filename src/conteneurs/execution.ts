@@ -83,9 +83,11 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
   const suivi: Suivi = { fin: null, sessionId: r?.sessionId ?? null, outils: new Set(), resultats: new Set(), expire: false };
   let conteneur: Docker.Container | undefined;
   let minuteur: NodeJS.Timeout | undefined;
+  let minuteurEscalade: NodeJS.Timeout | undefined;
+  let echec: string | null = null;
   // Si le defer est ignoré (appels parallèles), on coupe la session : la reprise se fera par message.
   const surEscalade = (id: string) => {
-    if (id === tacheId) setTimeout(() => { if (!suivi.fin) void conteneur?.remove({ force: true }).catch(() => {}); }, 5_000).unref();
+    if (id === tacheId) minuteurEscalade = setTimeout(() => { if (!suivi.fin) void conteneur?.remove({ force: true }).catch(() => {}); }, 5_000).unref();
   };
   deps.evenements.on('escalade', surEscalade);
   try {
@@ -101,7 +103,8 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     conteneur = c;
     deps.enCours.set(tacheId, c);
     minuteur = setTimeout(() => { suivi.expire = true; void c.remove({ force: true }).catch(() => {}); }, agent.dureeMaxMs);
-    await executerDans(c, args, decoupeurLignes(ligne => {
+    // Arrêt global pendant le démarrage du conteneur : on n'exécute rien.
+    if (lireTache(deps.db, tacheId).statut === 'en_cours') await executerDans(c, args, decoupeurLignes(ligne => {
       for (const ev of lireLigne(ligne)) {
         if (ev.type === 'init') suivi.sessionId = ev.sessionId;
         else if (ev.type === 'outil') { suivi.outils.add(ev.id); deps.surOutil?.(tacheId, c); }
@@ -114,13 +117,23 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
         } else if (ev.type === 'fin') { suivi.fin = ev; suivi.sessionId = ev.sessionId; }
       }
     }));
+  } catch (err) {
+    echec = (err instanceof Error ? err.message : String(err)).slice(0, 200);
   } finally {
     clearTimeout(minuteur);
+    clearTimeout(minuteurEscalade);
     deps.evenements.off('escalade', surEscalade);
     deps.enCours.delete(tacheId);
     deps.jetons.revoquer(tacheId);
     await conteneur?.remove({ force: true }).catch(() => {});
     await supprimerReseau(deps.docker, tacheId);
+  }
+  if (echec !== null && lireTache(deps.db, tacheId).statut === 'en_cours') {
+    const detail = `erreur d’exécution : ${echec}`;
+    definirReprise(deps.db, tacheId, null);
+    appliquer(deps.db, tacheId, { type: 'pause', raison: 'erreur_api', detail });
+    ajouterAuJournal(deps.db, deps.cle, { tacheId, type: 'evenement', commande: 'exécution de l’étape', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: detail });
+    return { issue: 'pause', raison: 'erreur_api' };
   }
   return conclure(deps, tacheId, agent, imageId, volume, suivi);
 }
