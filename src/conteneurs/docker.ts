@@ -107,7 +107,8 @@ async function executerJetable(docker: Docker, imageId: string, cmd: string[], m
 
 export async function preparerEspace(docker: Docker, imageId: string, tacheId: string, cheminProjet: string): Promise<string> {
   const volume = nomRessource(tacheId);
-  if (await docker.getVolume(volume).inspect().then(() => true, () => false)) throw new Error(`l’espace de ${tacheId} existe déjà`);
+  const existe = await docker.getVolume(volume).inspect().then(() => true, (e: unknown) => { if (codeHttp(e) === 404) return false; throw e; });
+  if (existe) throw new Error(`l’espace de ${tacheId} existe déjà`);
   await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
   const branche = `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
   const script = [
