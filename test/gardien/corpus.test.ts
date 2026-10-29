@@ -45,7 +45,8 @@ const COUCHE_3 = [
 // Contournements de la liste blanche : jamais « Autorisé » (refusée ou couche 3 acceptables).
 const NON_BLANCHES = [
   'git show HEAD:.env', 'git show :.env', 'git log -p -m .env', 'git diff -m id_rsa',
-  'rg --pre sh x notes.txt', 'rg --pre=sh x notes.txt', 'diff --from-file=/etc/passwd a.txt',
+  'rg --pre sh x notes.txt', 'rg --pre=sh x notes.txt', 'rg --hostname-bin outils/x --hyperlink-format x pat', 'rg -n TODO src',
+  'diff --from-file=/etc/passwd a.txt',
   'wc --files0-from=/etc/passwd', 'file -f/etc/passwd', 'grep -f/etc/passwd x', 'grep --file=/etc/passwd src',
   'tree -o/tmp/x', 'git diff -O/etc/passwd', 'npx ng test --watch=false',
 ];

@@ -65,7 +65,7 @@ function reglesStructurelles(mots: string[], racine: string): VerdictDecide | nu
 const OPTIONS_DOTNET = new Set(['--no-build', '--no-restore', '--nologo', '--locked-mode', '-c', '--configuration', '--filter', '-v', '--verbosity']);
 const OPTIONS_NG_TEST = /^--(code-coverage|watch=false|no-watch|browsers=[\w,]+|include=[\w./*-]+|project=[\w-]+)$/;
 const OPTIONS_NPM_CI = new Set(['--ignore-scripts', '--no-audit', '--no-fund', '--prefer-offline']);
-const LECTURE = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'find', 'pwd', 'tree', 'diff', 'echo', 'stat', 'file']);
+const LECTURE = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'find', 'pwd', 'tree', 'diff', 'echo', 'stat', 'file']);
 const FIND_INTERDIT = /^-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/;
 // Option sans valeur attachée : la valeur, si elle existe, est un mot séparé (donc vérifié par args).
 const OPTION_SIMPLE = /^-[A-Za-z0-9]+$|^--[a-z][a-z-]*$/;
@@ -92,8 +92,7 @@ function listeBlanche(mots: string[], racine: string): string | null {
       return 'commit sur la branche de la tâche';
     }
   }
-  if (LECTURE.has(m0) && args(1, o => OPTION_SIMPLE.test(o) && !(m0 === 'find' && FIND_INTERDIT.test(o)) && !(m0 === 'rg' && /^--pre(-glob)?$/.test(o))))
-    return 'lecture du projet';
+  if (LECTURE.has(m0) && args(1, o => OPTION_SIMPLE.test(o) && !(m0 === 'find' && FIND_INTERDIT.test(o)))) return 'lecture du projet';
   return null;
 }
 
