@@ -4,7 +4,7 @@ import { ouvrirBase } from '../../src/db.ts';
 import { creerTache, appliquer, lireTache } from '../../src/taches/depot.ts';
 import { enregistrerArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal, verifierJournal } from '../../src/integrite/journal.ts';
-import { decider, deciderEscalade, type DepsGardien, type EntreeHook } from '../../src/gardien/service.ts';
+import { decider, deciderEscalade, OUTIL_SORTIE, type DepsGardien, type EntreeHook } from '../../src/gardien/service.ts';
 import type { Avis, DemandeAvis } from '../../src/gardien/avis.ts';
 import type { Fiche } from '../../src/gardien/dependances.ts';
 
@@ -269,4 +269,10 @@ test('pause d’intégrité levée par le gardien : l’arrêt du conteneur est 
   db.prepare("UPDATE artefacts SET contenu = contenu || '\n- `**`'").run();
   assert.equal(decision(await decider(deps, 'T-45', bash('git status'))), 'deny');
   assert.deepEqual(escalades, ['T-45']);
+});
+
+test('outil de sortie structurée autorisé comme outil interne', async () => {
+  const { deps } = monter();
+  const s = await decider(deps, 'T-45', { tool_name: OUTIL_SORTIE, tool_input: { resume: 'fait' }, tool_use_id: 'toolu_so' });
+  assert.equal(decision(s), 'allow');
 });

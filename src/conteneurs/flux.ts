@@ -1,6 +1,6 @@
 export type Fin = {
   type: 'fin'; sessionId: string; sousType: string | null; stopReason: string | null; erreur: boolean;
-  apiErrorStatus: number | null; resultat: string; differe: { id: string; nom: string; entree: unknown } | null;
+  apiErrorStatus: number | null; resultat: string; differe: { id: string; nom: string; entree: unknown } | null; sortie: unknown;
 };
 export type EvenementFlux =
   | { type: 'init'; sessionId: string }
@@ -31,6 +31,7 @@ export function lireLigne(ligne: string): EvenementFlux[] {
     return [{
       type: 'fin', sessionId: m.session_id, sousType: m.subtype ?? null, stopReason: m.stop_reason ?? null, erreur: !!m.is_error,
       apiErrorStatus: m.api_error_status ?? null, resultat: String(m.result ?? ''), differe: d ? { id: d.id, nom: d.name, entree: d.input } : null,
+      sortie: m.structured_output ?? null,
     }];
   }
   return [];

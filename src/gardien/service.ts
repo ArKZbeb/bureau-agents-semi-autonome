@@ -30,7 +30,8 @@ export type DepsGardien = {
 type Decision = { decision: 'Autorisé' | 'Refusé' | 'Escaladé'; decideur: string; couche: Couche; raison: string };
 type Contexte = { tacheId: string; titre: string; plan: string | null; zones: string[] };
 
-const OUTILS_INTERNES = new Set(['Task', 'Agent', 'TodoWrite', 'ToolSearch', 'Skill', 'TaskStop']);
+export const OUTIL_SORTIE = 'StructuredOutput';
+const OUTILS_INTERNES = new Set(['Task', 'Agent', 'TodoWrite', 'ToolSearch', 'Skill', 'TaskStop', OUTIL_SORTIE]);
 const OUTILS_LECTURE = new Set(['Read', 'Glob', 'Grep', 'LS']);
 const OUTILS_ECRITURE = new Set(['Write', 'Edit']);
 const MAX_CONTENU = 20_000;
