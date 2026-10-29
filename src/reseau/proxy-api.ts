@@ -53,6 +53,7 @@ export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: 
   if (!tacheId) return erreurApi(res, 401, 'authentication_error', 'jeton de tâche invalide ou expiré');
   const chemin = new URL(req.url ?? '/', 'http://proxy.local').pathname;
   if (req.method !== 'POST' || !POINTS_AUTORISES.has(chemin)) return erreurApi(res, 404, 'not_found_error', 'point d’accès non autorisé');
+
   const tache = lireTache(deps.db, tacheId);
   if (tache.depenseUsd >= tache.budgetUsd) {
     deps.surBudgetDepasse(tacheId);
@@ -84,25 +85,28 @@ export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: 
   for (const n of ENTETES_RETOUR) { const v = amont.headers.get(n); if (v) retour[n] = v; }
   res.writeHead(amont.status, retour);
   const compteur = compteurUsage((amont.headers.get('content-type') ?? '').includes('event-stream'));
+  let interrompu = false;
   try {
     if (amont.body) for await (const morceau of amont.body) { res.write(morceau); compteur.ajouter(morceau); }
   } catch {
-    // Flux amont coupé : la réponse est close, mais l'usage vu jusqu'ici reste facturé ci-dessous.
+    interrompu = true;
   } finally {
-    res.end();
-    facturer(deps, tacheId, compteur, amont, req.url ?? '');
+    // Flux amont coupé : la connexion client est fermée sans fin propre, pour qu'un flux tronqué ne paraisse pas complet.
+    if (interrompu) res.destroy(); else res.end();
+    facturer(deps, tacheId, compteur, amont, chemin);
   }
 }
 
-/** Facture l'usage lu, même sur flux interrompu ; une erreur de calcul ne fait pas perdre la réponse. */
-function facturer(deps: DepsProxyApi, tacheId: string, compteur: ReturnType<typeof compteurUsage>, amont: Response, url: string): void {
+/** Facture l'usage lu, même sur flux interrompu. Un échec de facturation est journalisé et signalé à l'orchestrateur. */
+function facturer(deps: DepsProxyApi, tacheId: string, compteur: ReturnType<typeof compteurUsage>, amont: Response, chemin: string): void {
   try {
     const { usage, modele } = compteur.terminer();
-    if (usage && amont.ok && !url.includes('count_tokens')) {
+    if (usage && amont.ok && chemin !== '/v1/messages/count_tokens') {
       const t = ajouterDepense(deps.db, tacheId, coutUsd(usage, modele ?? '', deps.tarifs));
       if (t.depenseUsd >= t.budgetUsd) deps.surBudgetDepasse(tacheId);
     }
-  } catch {
-    // ponytail: un échec de facturation est silencieux ; ajouter un journal quand il arrive en pratique
+  } catch (e) {
+    console.error(`facturation impossible pour ${tacheId} : ${(e as Error).message}`);
+    try { deps.surBudgetDepasse(tacheId); } catch { /* signalement impossible : le journal console reste */ }
   }
 }

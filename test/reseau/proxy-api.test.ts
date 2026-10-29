@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { ouvrirBase } from '../../src/db.ts';
+import { ouvrirBase, type Base } from '../../src/db.ts';
 import { creerTache, lireTache } from '../../src/taches/depot.ts';
 import { Jetons } from '../../src/reseau/jetons.ts';
 import { relayerApi } from '../../src/reseau/proxy-api.ts';
@@ -11,8 +11,7 @@ import { demarrerFausseApi } from '../outils/fausse-api.ts';
 const CLE = 'cle-reelle-de-test';
 
 /** Proxy API seul, relié à un amont quelconque. Chaque traitement est mémorisé pour l'attendre. */
-function monterSur(urlAmont: string, budgetUsd = 6) {
-  const db = ouvrirBase(':memory:');
+function monterSur(urlAmont: string, budgetUsd = 6, db: Base = ouvrirBase(':memory:')) {
   creerTache(db, { id: 'T-41', projet: 'Film', titre: 't', cheminProjet: '/p', budgetUsd });
   const jetons = new Jetons();
   const jeton = jetons.creer('T-41', 60_000);
@@ -111,6 +110,8 @@ test('count_tokens relayé comme point d’accès autorisé', async () => {
   const r = await m.appelerChemin('POST', '/v1/messages/count_tokens?beta=true', m.jeton);
   assert.equal(r.status, 200);
   assert.equal(m.api.requetes.length, 1);
+  await Promise.all(m.traitements);
+  assert.equal(lireTache(m.db, 'T-41').depenseUsd, 0);
   await m.fermer();
 });
 
@@ -122,11 +123,35 @@ test('flux interrompu : l’usage reçu avant la coupure est facturé', async ()
   });
   const m = monterSur(up.url);
   const r = await m.appeler(m.jeton).catch(() => null);
-  if (r) await r.text().catch(() => undefined);
+  let complet = true;
+  if (r) {
+    try { await r.text(); } catch { complet = false; }
+  }
+  assert.equal(complet, false, 'le flux tronqué ne paraît pas complet côté client');
   await Promise.all(m.traitements);
   assert.ok(lireTache(m.db, 'T-41').depenseUsd > 0, 'la dépense partielle est imputée');
   await m.fermer();
   await up.fermer();
+});
+
+test('échec de facturation : réponse complète et signalée à l’orchestrateur', async () => {
+  const api = await demarrerFausseApi([{ outil: { nom: 'Bash', entree: { command: 'dotnet test' } } }]);
+  const base = ouvrirBase(':memory:');
+  const bdd = {
+    prepare: (sql: string) => {
+      if (sql.startsWith('UPDATE taches SET depense_usd')) throw new Error('base indisponible');
+      return base.prepare(sql);
+    },
+  } as unknown as Base;
+  const m = monterSur(api.url, 6, bdd);
+  const r = await m.appeler(m.jeton);
+  assert.equal(r.status, 200);
+  assert.match(await r.text(), /event: message_stop/);
+  await Promise.all(m.traitements);
+  assert.deepEqual(m.budgets, ['T-41'], 'l’échec de facturation est signalé');
+  assert.equal(lireTache(m.db, 'T-41').depenseUsd, 0);
+  await m.fermer();
+  await api.fermer();
 });
 
 test('redirection amont refusée en 502, non suivie', async () => {
