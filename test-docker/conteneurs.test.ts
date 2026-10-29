@@ -38,6 +38,8 @@ test('préparation : clone sans réseau, branche de la tâche', async () => {
   const volume = await preparerEspace(docker, image, T, depot);
   assert.equal(await lireFichierVolume(docker, image, volume, `${RACINE_PROJET}/README.md`), '# Film');
   assert.equal((await lireFichierVolume(docker, image, volume, `${RACINE_PROJET}/.git/HEAD`))?.trim(), 'ref: refs/heads/task/990');
+  await assert.rejects(preparerEspace(docker, image, T, depot), /existe déjà/);
+  assert.equal(await lireFichierVolume(docker, image, volume, `${RACINE_PROJET}/README.md`), '# Film', 'espace existant intact');
   assert.equal(await lireFichierVolume(docker, image, volume, '/etc/passwd'), null, 'lecture limitée au volume');
   assert.equal(await lireFichierVolume(docker, image, volume, '/workspace/../etc/passwd'), null, 'remontée refusée');
 });
