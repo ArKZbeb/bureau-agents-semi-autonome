@@ -181,3 +181,57 @@ test('cible absolue hors amont : 502, rien n’est envoyé', async () => {
   assert.equal(m.api.requetes.length, 0);
   await m.fermer();
 });
+
+/** Envoie un corps brut à /v1/messages avec des en-têtes choisis. */
+async function envoyerCorps(m: Awaited<ReturnType<typeof monter>>, corps: string, entetes: Record<string, string> = {}) {
+  return fetch(`${await m.url()}/v1/messages?beta=true`, {
+    method: 'POST',
+    headers: { 'x-api-key': m.jeton, 'content-type': 'application/json', 'anthropic-version': '2023-06-01', ...entetes },
+    body: corps,
+  });
+}
+
+const CORPS_BASE = { model: 'claude-sonnet-5-5', max_tokens: 10, stream: true, messages: [{ role: 'user', content: 'go' }] };
+
+test('requêtes ouvrant une sortie côté serveur : 403, rien n’atteint l’amont', async () => {
+  const m = await monter();
+  const refusees: Array<[string, string]> = [
+    ['mcp_servers', JSON.stringify({ ...CORPS_BASE, mcp_servers: [{ type: 'url', url: 'https://evil.example/mcp', name: 'x' }] })],
+    ['container', JSON.stringify({ ...CORPS_BASE, container: 'cnt_1' })],
+    ['web_fetch', JSON.stringify({ ...CORPS_BASE, tools: [{ name: 'Bash', input_schema: { type: 'object' } }, { type: 'web_fetch_20250910', name: 'web_fetch' }] })],
+    ['web_search', JSON.stringify({ ...CORPS_BASE, tools: [{ type: 'web_search_20250305', name: 'web_search' }] })],
+    ['code_execution', JSON.stringify({ ...CORPS_BASE, tools: [{ type: 'code_execution_20250825', name: 'code_execution' }] })],
+    ['type inconnu', JSON.stringify({ ...CORPS_BASE, tools: [{ type: 'bash_20250124', name: 'bash' }] })],
+    ['JSON invalide', '{"model":'],
+    ['corps non objet', '[1,2]'],
+  ];
+  for (const [nom, corps] of refusees) {
+    const r = await envoyerCorps(m, corps);
+    assert.equal(r.status, 403, nom);
+    assert.deepEqual(await r.json(), { type: 'error', error: { type: 'permission_error', message: 'requête non autorisée par le bureau' } }, nom);
+  }
+  assert.equal(m.api.requetes.length, 0, 'aucune requête refusée n’est relayée');
+  await m.fermer();
+});
+
+test('corps type Claude Code (outils clients) relayé, bêtas risquées retirées', async () => {
+  const m = await monter();
+  const corps = {
+    ...CORPS_BASE,
+    system: [{ type: 'text', text: 'Tu es Claude Code.', cache_control: { type: 'ephemeral' } }],
+    tools: [
+      { name: 'Bash', description: 'shell', input_schema: { type: 'object', properties: { command: { type: 'string' } } } },
+      { type: 'custom', name: 'Edit', input_schema: { type: 'object' } },
+    ],
+    metadata: { user_id: 'u' }, thinking: { type: 'enabled', budget_tokens: 1024 },
+  };
+  const r = await envoyerCorps(m, JSON.stringify(corps), {
+    'anthropic-beta': 'claude-code-20250219,mcp-client-2025-04-04, code-execution-2025-08-25,web-fetch-2025-09-10,web-search-2025-03-05,skills-2025-10-02,files-api-2025-04-14,interleaved-thinking-2025-05-14',
+  });
+  assert.equal(r.status, 200);
+  await r.text();
+  assert.equal(m.api.requetes.length, 1);
+  assert.deepEqual(m.api.requetes[0].corps, corps);
+  assert.equal(m.api.requetes[0].entetes['anthropic-beta'], 'claude-code-20250219,interleaved-thinking-2025-05-14');
+  await m.fermer();
+});

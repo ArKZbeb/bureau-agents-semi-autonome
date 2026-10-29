@@ -44,6 +44,26 @@ function compteurUsage(sse: boolean) {
   };
 }
 
+const BETAS_INTERDITES = ['mcp', 'code-execution', 'web-fetch', 'web-search', 'skills', 'files-api'];
+
+/**
+ * Refuse les requêtes qui feraient sortir les serveurs d'Anthropic vers l'extérieur
+ * (serveurs MCP, conteneurs, outils serveur) : seuls les outils clients sont admis.
+ */
+function corpsAutorise(corps: Buffer): boolean {
+  let json: unknown;
+  try { json = JSON.parse(corps.toString('utf8')); } catch { return false; }
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) return false;
+  const o = json as Record<string, unknown>;
+  if ('mcp_servers' in o || 'container' in o) return false;
+  if (o.tools === undefined) return true;
+  if (!Array.isArray(o.tools)) return false;
+  return o.tools.every(t => typeof t === 'object' && t !== null && (!('type' in t) || t.type === 'custom'));
+}
+
+const filtrerBetas = (v: string) =>
+  v.split(',').map(b => b.trim()).filter(b => b && !BETAS_INTERDITES.some(i => b.toLowerCase().includes(i))).join(',');
+
 // Seuls ces points d'accès sont relayés ; le reste (lots, fichiers…) n'atteint jamais l'amont.
 const POINTS_AUTORISES = new Set(['/v1/messages', '/v1/messages/count_tokens']);
 
@@ -62,8 +82,13 @@ export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: 
   if (!deps.cleApi) return erreurApi(res, 503, 'api_error', 'clé API absente côté orchestrateur');
 
   const corps = await lireCorps(req, 50_000_000);
+  if (chemin === '/v1/messages' && !corpsAutorise(corps)) return erreurApi(res, 403, 'permission_error', 'requête non autorisée par le bureau');
   const entetes: Record<string, string> = { 'x-api-key': deps.cleApi, 'accept-encoding': 'identity' };
   for (const n of ENTETES_TRANSMIS) { const v = req.headers[n]; if (typeof v === 'string') entetes[n] = v; }
+  if (entetes['anthropic-beta'] !== undefined) {
+    const betas = filtrerBetas(entetes['anthropic-beta']);
+    if (betas) entetes['anthropic-beta'] = betas; else delete entetes['anthropic-beta'];
+  }
 
   const cibleAmont = new URL(req.url ?? '/', deps.urlAmont);
   if (cibleAmont.origin !== new URL(deps.urlAmont).origin) return erreurApi(res, 502, 'api_error', 'cible amont refusée');
