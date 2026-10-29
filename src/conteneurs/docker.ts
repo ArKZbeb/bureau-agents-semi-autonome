@@ -235,12 +235,17 @@ export function fichierParametresVides(dossierDonnees: string): string {
 /** Volume jetable cloné depuis la branche : les agents en lecture seule y compilent et testent sans toucher à la branche. */
 export async function preparerCopieControle(docker: Docker, imageId: string, tacheId: string): Promise<string> {
   const volume = nomCopie(tacheId);
+  // Un montage de type volume créerait un volume source vide s'il manquait : on vérifie avant.
+  await docker.getVolume(nomRessource(tacheId)).inspect().catch((e: unknown) => {
+    if (codeHttp(e) === 404) throw new Error(`copie de contrôle de ${tacheId} impossible : espace de la tâche absent`);
+    throw e;
+  });
   await supprimerCopieControle(docker, tacheId);
   await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
   const script = [
     'export HOME=/tmp',
     `git config --global --add safe.directory '*'`,
-    `git clone --quiet --no-hardlinks --branch ${brancheTache(tacheId)} /source/projet ${RACINE_PROJET}`,
+    `git clone --quiet --no-hardlinks --branch '${brancheTache(tacheId)}' /source/projet ${RACINE_PROJET}`,
     `cd ${RACINE_PROJET}`,
     `git config user.name "Bureau d'agents"`,
     'git config user.email bureau@localhost',

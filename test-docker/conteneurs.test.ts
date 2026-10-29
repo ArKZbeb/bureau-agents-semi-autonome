@@ -123,3 +123,15 @@ test('copie de contrôle : branche committée seulement, modifications jetées',
     await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
   }
 });
+
+test('copie de contrôle : tâche sans espace, rien n’est créé', async () => {
+  const id = `T-SANS-${Date.now()}`;
+  try {
+    await assert.rejects(preparerCopieControle(docker, image, id), /espace de la tâche absent/);
+    await assert.rejects(docker.getVolume(nomCopie(id)).inspect());
+    await assert.rejects(docker.getVolume(nomRessource(id)).inspect());
+  } finally {
+    await supprimerCopieControle(docker, id).catch(() => {});
+    await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
+  }
+});
