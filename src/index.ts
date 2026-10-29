@@ -1,0 +1,13 @@
+import path from 'node:path';
+import { chargerConfig } from './config.ts';
+import { demarrerOrchestrateur } from './orchestrateur.ts';
+
+try {
+  const o = await demarrerOrchestrateur({ config: chargerConfig(), racineDepot: path.resolve(import.meta.dirname, '..') });
+  console.log(`Bureau d'agents prêt : ${o.urlUi}`);
+  console.log(`Jeton de session (en-tête Authorization: Bearer) : ${o.jetonSession}`);
+  process.on('SIGINT', () => void o.arreter().finally(() => process.exit(0)));
+} catch (e) {
+  console.error((e as Error).message);
+  process.exit(1);
+}
