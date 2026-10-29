@@ -52,3 +52,13 @@ test('manifeste falsifié ou absent = anomalie', () => {
   fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('sha256:abc', 'sha256:pirate'));
   assert.throws(() => verifierManifeste(donnees, cle, racine), /signature/);
 });
+
+test('manifeste illisible ou incomplet = anomalie', () => {
+  const { racine, donnees } = depot();
+  ecrireManifeste(donnees, cle, racine, 'sha256:abc');
+  const f = path.join(donnees, 'manifeste.json');
+  fs.writeFileSync(f, '{ illisible');
+  assert.throws(() => verifierManifeste(donnees, cle, racine), AnomalieIntegrite);
+  fs.writeFileSync(f, '{"manifeste":{}}');
+  assert.throws(() => verifierManifeste(donnees, cle, racine), AnomalieIntegrite);
+});

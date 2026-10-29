@@ -28,7 +28,15 @@ export function ecrireManifeste(dossierDonnees: string, cle: Buffer, racine: str
 export function verifierManifeste(dossierDonnees: string, cle: Buffer, racine: string): Manifeste {
   const chemin = path.join(dossierDonnees, NOM);
   if (!fs.existsSync(chemin)) throw new AnomalieIntegrite('manifeste', 'manifeste absent : lance npm run image');
-  const { manifeste, signature } = JSON.parse(fs.readFileSync(chemin, 'utf8')) as { manifeste: Manifeste; signature: string };
+  let lu: { manifeste: Manifeste; signature: string } | null;
+  try {
+    lu = JSON.parse(fs.readFileSync(chemin, 'utf8'));
+  } catch {
+    throw new AnomalieIntegrite('manifeste', 'manifeste illisible ou incomplet');
+  }
+  if (!lu || typeof lu.signature !== 'string' || !lu.manifeste || typeof lu.manifeste.image !== 'string' || typeof lu.manifeste.fichiers !== 'object' || lu.manifeste.fichiers === null)
+    throw new AnomalieIntegrite('manifeste', 'manifeste illisible ou incomplet');
+  const { manifeste, signature } = lu;
   if (!hmacValide(cle, JSON.stringify(manifeste), signature)) throw new AnomalieIntegrite('manifeste', 'manifeste : signature invalide');
   const actuel = calculerEmpreintes(racine);
   for (const f of new Set([...Object.keys(manifeste.fichiers), ...Object.keys(actuel)]))
