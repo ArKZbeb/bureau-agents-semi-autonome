@@ -134,3 +134,71 @@ test('plan altéré : refus et pause d’intégrité', async () => {
   assert.match(lireTache(db, 'T-45').raison ?? '', /^integrite/);
   assert.equal(lireJournal(db, 'T-45')[0].decideur, 'Contrôleur d’intégrité');
 });
+
+test('Edit sur fichier illisible : refusé (modification non contrôlable)', async () => {
+  const { deps } = monter();
+  const s = await decider(deps, 'T-45', { tool_name: 'Edit', tool_input: { file_path: '/workspace/projet/src/inconnu.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_inconnu' });
+  assert.equal(decision(s), 'deny');
+});
+
+test('NotebookEdit refusé (outil non prévu)', async () => {
+  const { deps } = monter();
+  assert.equal(decision(await decider(deps, 'T-45', { tool_name: 'NotebookEdit', tool_input: { notebook_path: '/workspace/projet/a.ipynb' } })), 'deny');
+});
+
+test('Glob et Grep : fichiers de secrets et chemins hors projet refusés', async () => {
+  const { deps } = monter();
+  const appel = (tool_name: string, tool_input: Record<string, unknown>) => decider(deps, 'T-45', { tool_name, tool_input, tool_use_id: `toolu_${++n}` }).then(decision);
+  assert.equal(await appel('Glob', { pattern: '**/.env*' }), 'deny');
+  assert.equal(await appel('Grep', { pattern: 'x', glob: '*.pem' }), 'deny');
+  assert.equal(await appel('Glob', { pattern: '../**' }), 'deny');
+  assert.equal(await appel('Grep', { pattern: 'Film', path: '/workspace/projet/src' }), 'allow');
+});
+
+test('autorisation liée au contenu : un script modifié après approbation n’est plus autorisé', async () => {
+  const fichiers: Record<string, string> = { '/workspace/projet/outils/prepa.sh': 'echo ok' };
+  const { db, deps } = monter({ avis: 'demander', fichiers });
+  const e = bash('bash outils/prepa.sh');
+  assert.equal(decision(await decider(deps, 'T-45', e)), 'defer');
+  const { id } = db.prepare('SELECT id FROM escalades').get() as { id: number };
+  deciderEscalade(db, cle, id, 'approuver', 'ok');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  fichiers['/workspace/projet/outils/prepa.sh'] = 'echo pirate';
+  assert.notEqual(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_pirate' })), 'allow');
+});
+
+test('autorisation approuvée : même appel, contenu inchangé, accepté', async () => {
+  const fichiers: Record<string, string> = { '/workspace/projet/outils/prepa.sh': 'echo ok' };
+  const { db, deps } = monter({ avis: 'demander', fichiers });
+  const e = bash('bash outils/prepa.sh');
+  assert.equal(decision(await decider(deps, 'T-45', e)), 'defer');
+  const { id } = db.prepare('SELECT id FROM escalades').get() as { id: number };
+  deciderEscalade(db, cle, id, 'approuver', 'ok');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  assert.equal(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_meme' })), 'allow');
+});
+
+test('escalade : refusée si la tâche n’est pas en pause pour elle, rien n’est écrit', () => {
+  const { db } = monter();
+  appliquer(db, 'T-45', { type: 'pause', raison: 'integrite', detail: 'x' });
+  db.prepare(`INSERT INTO escalades (tache_id, outil, entree, empreinte_appel, raison, statut, cree_le) VALUES ('T-45', 'Bash', '{}', 'emp', 'r', 'en_attente', '2026-10-29T00:00:00.000Z')`).run();
+  const { id } = db.prepare('SELECT id FROM escalades').get() as { id: number };
+  assert.throws(() => deciderEscalade(db, cle, id, 'approuver', 'ok'), /pas en attente de cette escalade/);
+  assert.equal((db.prepare('SELECT statut FROM escalades WHERE id = ?').get(id) as { statut: string }).statut, 'en_attente');
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM autorisations').get() as { n: number }).n, 0);
+});
+
+test('panne du gardien pendant l’avis : refus et entrée au journal', async () => {
+  const { db, deps } = monter();
+  deps.avis = async () => { throw new Error('panne'); };
+  const e = bash('rm -rf node_modules/.cache');
+  assert.equal(decision(await decider(deps, 'T-45', e)), 'deny');
+  const entree = lireJournal(db, 'T-45').find(x => x.toolUseId === e.tool_use_id);
+  assert.equal(entree?.decideur, 'Gardien');
+  assert.match(entree?.raison ?? '', /^erreur du gardien : panne/);
+});
+
+test('appel mal formé (commande non textuelle) refusé', async () => {
+  const { deps } = monter();
+  assert.equal(decision(await decider(deps, 'T-45', { tool_name: 'Bash', tool_input: { command: 42 }, tool_use_id: 'toolu_42' })), 'deny');
+});
