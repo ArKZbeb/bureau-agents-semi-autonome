@@ -14,6 +14,7 @@ export type Config = {
   dossierDonnees: string;
   portUi: number;
   portConteneurs: number;
+  adresseConteneurs: string | undefined;
   urlApiAmont: string;
   cleApi: string | undefined;
   modeleGardien: string;
@@ -38,6 +39,7 @@ export function chargerConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dossierDonnees: env.BUREAU_DONNEES ?? path.join(base, 'bureau-agents'),
     portUi: Number(env.BUREAU_PORT_UI ?? 4310),
     portConteneurs: Number(env.BUREAU_PORT_CONTENEURS ?? 4311),
+    adresseConteneurs: env.BUREAU_ADRESSE_CONTENEURS,
     urlApiAmont: env.BUREAU_URL_API ?? 'https://api.anthropic.com',
     cleApi: env.ANTHROPIC_API_KEY,
     modeleGardien: env.BUREAU_MODELE_GARDIEN ?? 'claude-haiku-5-5',

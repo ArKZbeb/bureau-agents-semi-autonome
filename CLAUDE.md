@@ -66,6 +66,9 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
 
 - Installation : `npm ci` (les scripts npm passent par Git Bash, voir `.npmrc`). Sous Linux, préfixer les commandes npm de
   `npm_config_script_shell=/bin/bash` (le `.npmrc` vise Git Bash sous Windows ; ne pas le modifier).
+- Linux avec Docker Desktop installé : exporter `DOCKER_HOST=unix:///var/run/docker.sock`, pour que `npm run image` (CLI docker)
+  et dockerode visent le même démon. Le serveur des conteneurs écoute sur 127.0.0.1 et sur la passerelle du pont Docker
+  (jamais 0.0.0.0) ; `BUREAU_ADRESSE_CONTENEURS` la remplace (IPv4 privée seulement).
 - Proxy TLS d'entreprise : copier le certificat racine dans `conteneur/certificats/entreprise.crt` (non versionné) et lancer
   Node avec `NODE_EXTRA_CA_CERTS` pointant vers ce certificat.
 - Image des agents + manifeste signé : `npm run image` (à relancer après toute modification de `agents/` ou `conteneur/`).

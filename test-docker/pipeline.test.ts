@@ -11,7 +11,7 @@ import { ecrireManifeste } from '../src/integrite/manifeste.ts';
 import { lireJournal, verifierJournal } from '../src/integrite/journal.ts';
 import { lireArtefact, type TypeArtefact } from '../src/integrite/artefacts.ts';
 import { construireImage } from '../src/conteneurs/image.ts';
-import { lireFichierVolume, nomRessource, RACINE_PROJET } from '../src/conteneurs/docker.ts';
+import { brancheTache, lireFichierVolume, nomRessource, RACINE_PROJET } from '../src/conteneurs/docker.ts';
 import { demarrerOrchestrateur, type Orchestrateur } from '../src/orchestrateur.ts';
 import { lireTache } from '../src/taches/depot.ts';
 import type { ClientAvis } from '../src/gardien/avis.ts';
@@ -115,6 +115,9 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     assert.ok(journal.some(e => e.type === 'decision' && e.commande.includes('src/piege.js') && e.decision === 'Refusé' && e.decideur === 'Liste noire' && e.raison.includes('agent en lecture seule : Write et Edit retirés')));
     assert.ok(journal.some(e => e.type === 'decision' && e.commande.includes('src/cadreur.js') && e.decision === 'Refusé' && e.raison.includes('le cadreur n’écrit que spec.md et plan.md')));
 
+    assert.ok(journal.some(e => e.type === 'decision' && e.commande.startsWith('git add src/export.js && git commit') && e.decision === 'Autorisé'), 'commit autorisé par le gardien');
+    const ref = await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/.git/refs/heads/${brancheTache(T)}`);
+    assert.match(ref ?? '', /^[0-9a-f]{40}\n?$/, 'la branche de la tâche porte un commit');
     assert.match(lireArtefact(o.db, cle, T, 'spec')?.contenu ?? '', /Critères d’acceptation/);
     assert.equal(lireArtefact(o.db, cle, T, 'criteres')?.contenu, '1. Le fichier src/export.js existe\n');
     const types: TypeArtefact[] = ['spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'];

@@ -25,6 +25,7 @@ import { arbitrer, continuerBudget, repondreCadreur, reprendre, validerCadrage }
 import { demanderControle } from './pipeline/controleur.ts';
 import { creerOrdonnanceur } from './pipeline/ordonnanceur.ts';
 import type { DepsPipeline } from './pipeline/pipeline.ts';
+import { adressesConteneurs } from './reseau/adresses.ts';
 import { Jetons } from './reseau/jetons.ts';
 import { relayerApi } from './reseau/proxy-api.ts';
 import { creerServeurConteneurs } from './reseau/serveur-conteneurs.ts';
@@ -47,7 +48,7 @@ export type Orchestrateur = {
   arreter: () => Promise<void>;
 };
 
-const ecouter = (s: http.Server, port: number) => new Promise<void>((ok, ko) => { s.once('error', ko); s.listen(port, '127.0.0.1', () => ok()); });
+const ecouter = (s: http.Server, port: number, adresse = '127.0.0.1') => new Promise<void>((ok, ko) => { s.once('error', ko); s.listen(port, adresse, () => ok()); });
 const fermer = (s: http.Server) => new Promise<void>(ok => { s.closeAllConnections(); s.close(() => ok()); });
 
 export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Orchestrateur> {
@@ -91,7 +92,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     surEscalade: id => evenements.emit('escalade', id),
   };
 
-  const serveurConteneurs = creerServeurConteneurs({
+  const creerServeurDesConteneurs = () => creerServeurConteneurs({
     jetons, domaines: config.domainesAutorises, ports: [443],
     gardien: (id, e) => decider(gardien, id, e),
     api: (req, res) => relayerApi({
@@ -172,8 +173,21 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
       return reprendre(db, cle, id);
     },
   });
-  await ecouter(serveurConteneurs, config.portConteneurs);
-  await ecouter(serveurUi, config.portUi);
+  // Le serveur des conteneurs écoute sur 127.0.0.1 et sur la passerelle du pont Docker (jamais 0.0.0.0) : sous Linux, host.docker.internal y mène.
+  const passerelleBridge = await docker.getNetwork('bridge').inspect().then(
+    (n: { IPAM?: { Config?: { Gateway?: string }[] } }) => n.IPAM?.Config?.[0]?.Gateway ?? null, () => null);
+  const serveursConteneurs: http.Server[] = [];
+  try {
+    for (const adresse of adressesConteneurs(passerelleBridge, config.adresseConteneurs)) {
+      const s = creerServeurDesConteneurs();
+      serveursConteneurs.push(s);
+      await ecouter(s, config.portConteneurs, adresse);
+    }
+    await ecouter(serveurUi, config.portUi);
+  } catch (e) {
+    await Promise.all(serveursConteneurs.map(fermer));
+    throw e;
+  }
   ordonnanceur.demarrer();
   return {
     db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`,
@@ -190,7 +204,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
       await arreterConteneurs(docker);
       await fin;
       await fermer(serveurUi);
-      await fermer(serveurConteneurs);
+      await Promise.all(serveursConteneurs.map(fermer));
       db.close();
     },
   };
