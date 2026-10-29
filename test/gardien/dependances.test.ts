@@ -97,6 +97,13 @@ test('redirections ignorées lors de la détection', () => {
   assert.deepEqual(dependancesCommande('npm i x > log.txt'), [{ ecosysteme: 'npm', nom: 'x', version: null }]);
 });
 
+test('redirection collée à un séparateur : le séparateur n’est pas avalé', () => {
+  assert.deepEqual(dependancesCommande('npm i x 2>/dev/null&&dotnet add package Ok'), [
+    { ecosysteme: 'npm', nom: 'x', version: null }, { ecosysteme: 'NuGet', nom: 'Ok', version: null }]);
+  assert.deepEqual(dependancesCommande('npm i x >log.txt&&npm i evil'), [
+    { ecosysteme: 'npm', nom: 'x', version: null }, { ecosysteme: 'npm', nom: 'evil', version: null }]);
+});
+
 test('nom ressemblant à une source hors registre : refus sans appel réseau', async () => {
   const { f, appels } = fetchCompte();
   const fiche = await ficheDependance({ ecosysteme: 'npm', nom: 'evil/pkg', version: null }, f);

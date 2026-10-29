@@ -57,7 +57,7 @@ export function dependancesCommande(commande: string): Dependance[] {
   const res: Dependance[] = [];
   // ponytail: découpe naïve ; les guillemets sont retirés, pas interprétés. Le gardien évalue aussi la commande brute.
   // Redirections (2>&1, > log, < entrée) retirées avant la découpe sur « & ».
-  const nettoyee = commande.replace(/['"]/g, '').replace(/\d*>&\d+|\d*>>?\s*\S+|<\s*\S+/g, ' ');
+  const nettoyee = commande.replace(/['"]/g, '').replace(/\d*>&\d+|\d*>>?\s*[^\s;&|()`<>]+|<\s*[^\s;&|()`<>]+/g, ' ');
   for (const segment of nettoyee.split(/&&|\|\||[;|&\n()`]|\$\(/)) {
     const mots = sansEnveloppes(segment.trim().split(/\s+/).filter(Boolean));
     const [m0, m1, m2] = mots;
