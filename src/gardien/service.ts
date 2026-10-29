@@ -86,14 +86,13 @@ export async function decider(deps: DepsGardien, tacheId: string, e: EntreeHook)
   let empreinte = '';
   try {
     d = await evaluer(deps, tacheId, outil, entree);
-    if (d.decision === 'Escaladé') {
-      // Une escalade n'est créée que si la tâche tourne encore : sinon rien ne passe, et rien n'est enregistré.
-      if (!enCours(deps, tacheId)) d = enPause();
-      else empreinte = await empreinteEffective(deps, tacheId, outil, entree);
-    }
+    if (d.decision === 'Escaladé') empreinte = await empreinteEffective(deps, tacheId, outil, entree);
   } catch (err) {
     d = { decision: 'Refusé', decideur: 'Gardien', couche: '—', raison: `erreur du gardien : ${(err as Error).message}` };
   }
+  // Plus aucun await jusqu'à la pause : une escalade concurrente trouve la tâche déjà en pause et devient un refus.
+  // Une escalade n'est créée que si la tâche tourne encore : sinon rien ne passe, et rien n'est enregistré.
+  if (d.decision === 'Escaladé' && !enCours(deps, tacheId)) d = enPause();
   ajouterAuJournal(deps.db, deps.cle, {
     tacheId, type: 'decision', outil, commande: descriptionAppel(outil, entree), couche: d.couche,
     decision: d.decision, decideur: d.decideur, raison: d.raison, toolUseId: e.tool_use_id ?? null,

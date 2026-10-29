@@ -253,3 +253,13 @@ test('liens symboliques : lecture évaluée sur la cible résolue', async () => 
   assert.equal(await appel('Grep', { pattern: 'x', path: '/workspace/projet/docs' }), 'deny');
   assert.equal(await appel('Glob', { pattern: '*.ts', path: '/workspace/projet/docs' }), 'deny');
 });
+
+test('deux escalades simultanées : une seule escalade, l’autre appel refusé', async () => {
+  const { db, deps, escalades } = monter({ avis: 'demander' });
+  const sorties = await Promise.all([decider(deps, 'T-45', bash('npm install csv-parsr@0.1.2')), decider(deps, 'T-45', bash('npm install left-padd@1.0.0'))]);
+  assert.deepEqual(sorties.map(decision).sort(), ['defer', 'deny']);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM escalades').get() as { n: number }).n, 1);
+  assert.deepEqual(escalades, ['T-45']);
+  assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
+  verifierJournal(db, cle);
+});
