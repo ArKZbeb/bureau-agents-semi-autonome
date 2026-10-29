@@ -19,8 +19,8 @@ export function lireLigne(ligne: string): EvenementFlux[] {
     return [];
   }
   if (m?.type === 'system' && m.subtype === 'init') return [{ type: 'init', sessionId: m.session_id }];
-  if (m?.type === 'assistant')
-    return (m.message?.content ?? []).flatMap((b: Json): EvenementFlux[] =>
+  if (m?.type === 'assistant' && Array.isArray(m.message?.content))
+    return m.message.content.flatMap((b: Json): EvenementFlux[] =>
       b.type === 'tool_use' ? [{ type: 'outil', id: b.id, nom: b.name, entree: b.input }] : b.type === 'text' ? [{ type: 'texte', texte: b.text }] : []);
   if (m?.type === 'user' && Array.isArray(m.message?.content))
     return m.message.content

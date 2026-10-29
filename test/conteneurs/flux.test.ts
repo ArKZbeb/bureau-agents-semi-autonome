@@ -18,6 +18,8 @@ test('événements extraits des lignes', () => {
   assert.deepEqual(lireLigne(DIFFERE), [{ type: 'fin', sessionId: '43c06cbc', sousType: 'success', stopReason: 'tool_deferred', erreur: false, apiErrorStatus: null, resultat: '', differe: { id: 'toolu_4', nom: 'Bash', entree: { command: 'npm install csv-parsr@0.1.2' } } }]);
   assert.equal((lireLigne(ERREUR)[0] as { apiErrorStatus: number }).apiErrorStatus, 403);
   assert.deepEqual(lireLigne('pas du json'), []);
+  assert.deepEqual(lireLigne('{"type":"assistant","message":{"content":null}}'), []);
+  assert.deepEqual(lireLigne('{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"..."}]}}'), []);
 });
 
 test('découpage en lignes malgré des morceaux coupés au milieu d’un caractère', () => {

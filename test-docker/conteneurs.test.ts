@@ -39,11 +39,13 @@ test('préparation : clone sans réseau, branche de la tâche', async () => {
   assert.equal(await lireFichierVolume(docker, image, volume, `${RACINE_PROJET}/README.md`), '# Film');
   assert.equal((await lireFichierVolume(docker, image, volume, `${RACINE_PROJET}/.git/HEAD`))?.trim(), 'ref: refs/heads/task/990');
   assert.equal(await lireFichierVolume(docker, image, volume, '/etc/passwd'), null, 'lecture limitée au volume');
+  assert.equal(await lireFichierVolume(docker, image, volume, '/workspace/../etc/passwd'), null, 'remontée refusée');
 });
 
 test('conteneur durci : non root, racine en lecture seule, sans capacité, sans socket ni sortie réseau', async () => {
   await assurerPasserelle(docker, image, 47999);
   const reseau = await preparerReseau(docker, T);
+  assert.equal((await docker.getNetwork(reseau).inspect()).Internal, true);
   const c = await creerConteneurAgent(docker, { tacheId: T, imageId: image, reseau, volume: nomRessource(T), env: ['BUREAU_JETON=jeton'], ressources: { memoire: 512 * 1024 ** 2, cpus: 1, pids: 128 }, parametresVides: fichierParametresVides(fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-donnees-'))) });
   const info = await c.inspect();
   assert.equal(info.Config.User, 'node');
@@ -70,5 +72,11 @@ test('conteneur durci : non root, racine en lecture seule, sans capacité, sans 
   assert.notEqual((await sh(`echo '{"env":{"X":"1"}}' > /workspace/.etat-claude/settings.json`)).code, 0);
   assert.equal((await sh('cat /workspace/.etat-claude/settings.json')).sortie, '{}');
   assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/README.md`), '# Film');
+  assert.equal(await lireFichierConteneur(c, '/workspace/../etc/passwd'), null);
+  assert.equal((await sh('ln -s /etc/passwd /workspace/projet/lien && mkfifo /workspace/projet/f')).code, 0);
+  assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/lien`), null, 'lien symbolique refusé');
+  assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/f`), null, 'FIFO refusée');
+  assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/lien`), null, 'lien symbolique refusé (volume)');
+  assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/f`), null, 'FIFO refusée (volume)');
   assert.equal(await arreterConteneurs(docker, T), 1);
 });

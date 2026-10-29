@@ -53,11 +53,20 @@ export async function assurerPasserelle(docker: Docker, imageId: string, port: n
 export async function preparerReseau(docker: Docker, tacheId: string): Promise<string> {
   const nom = nomRessource(tacheId);
   const existants = await docker.listNetworks({ filters: { name: [nom] } });
-  if (!existants.some(n => n.Name === nom)) await docker.createNetwork({ Name: nom, Internal: true, Labels: { [LABEL_TACHE]: tacheId } });
+  let cree = false;
+  if (existants.some(n => n.Name === nom)) {
+    if ((await docker.getNetwork(nom).inspect()).Internal !== true) throw new Error(`réseau ${nom} non interne : refus de le réutiliser`);
+  } else {
+    await docker.createNetwork({ Name: nom, Internal: true, Labels: { [LABEL_TACHE]: tacheId } });
+    cree = true;
+  }
   try {
     await docker.getNetwork(nom).connect({ Container: NOM_PASSERELLE, EndpointConfig: { Aliases: ['passerelle'] } });
   } catch (e) {
-    if (codeHttp(e) !== 403 && codeHttp(e) !== 409) throw e; // déjà connectée
+    if (codeHttp(e) !== 403 && codeHttp(e) !== 409) {
+      if (cree) await docker.getNetwork(nom).remove().catch(() => {});
+      throw e;
+    }
   }
   return nom;
 }
@@ -81,12 +90,14 @@ export function demultiplexer(brut: Buffer): { stdout: Buffer; stderr: Buffer } 
 /** Conteneur jetable, sans réseau, pour les opérations de l'orchestrateur sur un volume. */
 async function executerJetable(docker: Docker, imageId: string, cmd: string[], montages: Docker.MountConfig): Promise<{ code: number; stdout: Buffer; stderr: Buffer }> {
   const c = await docker.createContainer({
-    Image: imageId, User: 'node', Cmd: cmd,
+    Image: imageId, User: 'node', Cmd: cmd, Labels: { [LABEL_TACHE]: 'jetable' },
     HostConfig: { ...DURCISSEMENT, NetworkMode: 'none', Memory: 256 * 1024 ** 2, PidsLimit: 64, Tmpfs: { '/tmp': 'rw,nosuid,size=64m' }, Mounts: montages },
   });
   try {
     await c.start();
-    const { StatusCode } = await c.wait();
+    let minuteur: NodeJS.Timeout | undefined;
+    const delai = new Promise<never>((_, rejeter) => { minuteur = setTimeout(() => rejeter(new Error('conteneur jetable : délai dépassé')), 60_000); });
+    const { StatusCode } = await Promise.race([c.wait(), delai]).finally(() => clearTimeout(minuteur));
     const brut = (await c.logs({ stdout: true, stderr: true, follow: false })) as unknown as Buffer;
     return { code: StatusCode, ...demultiplexer(brut) };
   } finally {
@@ -113,13 +124,20 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
     { Type: 'volume', Source: volume, Target: '/workspace' },
     { Type: 'bind', Source: cheminProjet, Target: '/source', ReadOnly: true },
   ]);
-  if (r.code !== 0) throw new Error(`préparation de l’espace de ${tacheId} impossible : ${r.stderr.toString('utf8').slice(-500)}`);
+  if (r.code !== 0) {
+    await docker.getVolume(volume).remove({ force: true }).catch(() => {});
+    throw new Error(`préparation de l’espace de ${tacheId} impossible : ${r.stderr.toString('utf8').slice(-500)}`);
+  }
   return volume;
 }
 
+const cheminConfine = (chemin: string) => path.posix.normalize(chemin).startsWith('/workspace/');
+// Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, plafonne à 5 Mo.
+const commandeLecture = (chemin: string) => ['sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c 5242880 -- "$p"', 'lecture', chemin];
+
 export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string): Promise<string | null> {
-  if (!chemin.startsWith('/workspace/')) return null;
-  const r = await executerJetable(docker, imageId, ['cat', '--', chemin], [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  if (!cheminConfine(chemin)) return null;
+  const r = await executerJetable(docker, imageId, commandeLecture(chemin), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
   return r.code === 0 ? r.stdout.toString('utf8') : null;
 }
 
@@ -140,7 +158,12 @@ export async function creerConteneurAgent(
       ],
     },
   });
-  await c.start();
+  try {
+    await c.start();
+  } catch (e) {
+    await c.remove({ force: true }).catch(() => {});
+    throw e;
+  }
   return c;
 }
 
@@ -159,9 +182,13 @@ export async function executerDans(conteneur: Docker.Container, cmd: string[], s
 }
 
 export async function lireFichierConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {
+  if (!cheminConfine(chemin)) return null;
   const morceaux: Buffer[] = [];
-  const r = await executerDans(conteneur, ['cat', '--', chemin], m => morceaux.push(m));
-  return r.code === 0 ? Buffer.concat(morceaux).toString('utf8') : null;
+  const r = await Promise.race([
+    executerDans(conteneur, commandeLecture(chemin), m => morceaux.push(m)),
+    new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
+  ]);
+  return r && r.code === 0 ? Buffer.concat(morceaux).toString('utf8') : null;
 }
 
 export async function arreterConteneurs(docker: Docker, tacheId?: string): Promise<number> {
