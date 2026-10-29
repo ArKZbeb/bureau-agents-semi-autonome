@@ -121,7 +121,7 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
     `git config --global --add safe.directory '*'`,
     `git clone --quiet --no-hardlinks /source ${RACINE_PROJET}`,
     `cd ${RACINE_PROJET}`,
-    `git checkout --quiet -b ${branche}`,
+    `git checkout --quiet -b '${branche}'`,
     `git config user.name "Bureau d'agents"`,
     'git config user.email bureau@localhost',
     `mkdir -p ${DOSSIER_ETAT} ${DOSSIER_CADRAGE}`,

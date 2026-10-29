@@ -10,6 +10,7 @@ async function monter() {
   const decisions: unknown[] = [];
   let arrets = 0;
   const actions: unknown[] = [];
+  const creations: unknown[] = [];
   const serveur = creerServeurUi(JETON, {
     taches: () => [{ id: 'T-41' }],
     journal: id => [{ tacheId: id }],
@@ -17,7 +18,7 @@ async function monter() {
     deciderEscalade: (id, decision, commentaire) => { decisions.push([id, decision, commentaire]); return { ok: true }; },
     arretGlobal: async () => { arrets++; return { conteneursArretes: 2 }; },
     tache: id => (id === 'T-41' ? { id } : null),
-    creerTache: async t => ({ id: 'T-42', ...t }),
+    creerTache: async t => { creations.push(t); return { id: 'T-42', ...t }; },
     action: (id, nom, corps) => { if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi'); actions.push([id, nom, corps]); return { ok: true }; },
   });
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
@@ -33,7 +34,7 @@ async function monter() {
       req.on('error', ko);
       req.end(o.corps === undefined ? undefined : JSON.stringify(o.corps));
     });
-  return { adresse, appeler, decisions, actions, arrets: () => arrets, fermer: () => serveur.close() };
+  return { adresse, appeler, decisions, actions, creations, arrets: () => arrets, fermer: () => serveur.close() };
 }
 
 test('écoute uniquement sur 127.0.0.1', async () => {
@@ -97,5 +98,21 @@ test('routes du pipeline : lecture, création, actions, erreurs 404 / 400 / 409'
   assert.deepEqual(s.actions.at(-1), ['T-41', 'reponse', { texte: 'A4' }]);
   assert.equal((await s.appeler('/api/taches/T-41/inconnue', { methode: 'POST', corps: {} })).statut, 404);
   assert.deepEqual(await s.appeler('/api/taches/T-99/reprise', { methode: 'POST', corps: {} }), { statut: 409, corps: { erreur: 'T-99 ne se reprend pas ainsi' } });
+  s.fermer();
+});
+
+test('POST /api/taches ne transmet jamais un id fourni par le corps', async () => {
+  const s = await monter();
+  const r = await s.appeler('/api/taches', { methode: 'POST', corps: { id: "T-1'; rm -rf /; '", projet: 'Film', titre: 'Export', cheminProjet: '/p', budgetUsd: 6, demande: 'x', autre: 1 } });
+  assert.equal(r.statut, 200);
+  assert.deepEqual(s.creations.at(-1), { projet: 'Film', titre: 'Export', cheminProjet: '/p', budgetUsd: 6, demande: 'x' });
+  s.fermer();
+});
+
+test('POST /api/taches : cheminProjet relatif refusé (400)', async () => {
+  const s = await monter();
+  const r = await s.appeler('/api/taches', { methode: 'POST', corps: { projet: 'Film', titre: 'Export', cheminProjet: '../p', budgetUsd: 6, demande: 'x' } });
+  assert.equal(r.statut, 400);
+  assert.equal(s.creations.length, 0);
   s.fermer();
 });

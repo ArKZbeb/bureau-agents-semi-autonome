@@ -1,4 +1,5 @@
 import http from 'node:http';
+import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { sha256 } from '../integrite/signature.ts';
 import { lireCorps, repondreJson } from './http.ts';
@@ -60,9 +61,11 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
   if (req.method === 'POST' && url.pathname === '/api/taches') {
     const c = await lireObjet(req);
     const ok = c && ['projet', 'titre', 'cheminProjet', 'demande'].every(k => typeof c[k] === 'string' && (c[k] as string).trim() !== '')
-      && typeof c.budgetUsd === 'number' && c.budgetUsd > 0;
-    if (!ok) return repondreJson(res, 400, { erreur: 'attendu : projet, titre, cheminProjet, demande, budgetUsd > 0' });
-    return repondreJson(res, 200, await routes.creerTache(c as Parameters<RoutesUi['creerTache']>[0]));
+      && typeof c.budgetUsd === 'number' && c.budgetUsd > 0 && path.isAbsolute(c.cheminProjet as string);
+    if (!c || !ok) return repondreJson(res, 400, { erreur: 'attendu : projet, titre, demande, cheminProjet absolu, budgetUsd > 0' });
+    // Objet explicite : l'identifiant est toujours attribué par l'orchestrateur, jamais par le corps.
+    const { projet, titre, cheminProjet, budgetUsd, demande } = c as Parameters<RoutesUi['creerTache']>[0];
+    return repondreJson(res, 200, await routes.creerTache({ projet, titre, cheminProjet, budgetUsd, demande }));
   }
   const fiche = /^\/api\/taches\/(T-\d+)$/.exec(url.pathname);
   if (req.method === 'GET' && fiche) {

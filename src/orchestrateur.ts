@@ -125,14 +125,15 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
   const ordonnanceur = creerOrdonnanceur(pipeline, { simultanees: config.tachesSimultanees, intervalleMs: 5_000, delaisErreurApiMs: [60_000, 300_000, 900_000] });
 
   const creerTacheAvecDemande = async (t: Omit<NouvelleTache, 'id'> & { id?: string; demande: string }) => {
-    const id = t.id ?? `T-${(db.prepare('SELECT count(*) AS n FROM taches').get() as { n: number }).n + 1}`;
-    const tache = creerTache(db, { ...t, id });
-    enregistrerArtefact(db, cle, id, 'demande', t.demande);
+    if (t.id !== undefined && !/^T-\d+$/.test(t.id)) throw new Error(`identifiant de tâche invalide : ${t.id}`);
+    const id = t.id ?? `T-${(db.prepare(`SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS n FROM taches`).get() as { n: number }).n + 1}`;
+    // L'espace est prêt avant que la tâche n'existe : l'ordonnanceur ne peut pas la lancer sur un volume vide.
     try { await preparerEspace(docker, manifeste.image, id, t.cheminProjet); } catch (err) {
-      appliquer(db, id, { type: 'abandon' });
       journaliser({ tacheId: id, type: 'evenement', commande: 'préparation impossible', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (err as Error).message.slice(0, 200) });
       throw err;
     }
+    const tache = creerTache(db, { ...t, id });
+    enregistrerArtefact(db, cle, id, 'demande', t.demande);
     journaliser({ tacheId: id, type: 'evenement', commande: `git clone ${t.cheminProjet} ${id}`, couche: '—', decision: 'Autorisé', decideur: 'Orchestrateur', raison: 'préparation du conteneur' });
     return tache;
   };
@@ -145,18 +146,18 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     deciderEscalade: decision,
     arretGlobal,
     tache: id => {
+      if (!db.prepare('SELECT 1 FROM taches WHERE id = ?').get(id)) return null;
+      const t = lireTache(db, id);
       try {
-        const t = lireTache(db, id);
-        try {
-          const documents = Object.fromEntries((['demande', 'spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'] as const)
-            .map(type => [type, lireArtefact(db, cle, id, type)?.contenu ?? null]));
-          return { tache: t, documents, proposition: lireProposition(db, id), echanges: listerEchanges(db, id) };
-        } catch (e) {
-          if (e instanceof AnomalieIntegrite) return { tache: t, anomalie: e.message };
-          throw e;
-        }
-      } catch {
-        return null;
+        const documents = Object.fromEntries((['demande', 'spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'] as const)
+          .map(type => [type, lireArtefact(db, cle, id, type)?.contenu ?? null]));
+        return { tache: t, documents, proposition: lireProposition(db, id), echanges: listerEchanges(db, id) };
+      } catch (e) {
+        if (!(e instanceof AnomalieIntegrite)) throw e;
+        // Une anomalie constatée à la lecture met la tâche en pause quand la machine à états le permet ; sinon, journal seul.
+        if (t.statut === 'prete' || t.statut === 'en_cours') appliquer(db, id, { type: 'pause', raison: 'integrite', detail: e.message });
+        journaliser({ tacheId: id, type: 'evenement', commande: 'lecture des documents', couche: '—', decision: 'Refusé', decideur: 'Contrôleur d’intégrité', raison: e.message.slice(0, 200) });
+        return { tache: lireTache(db, id), anomalie: e.message };
       }
     },
     creerTache: t => creerTacheAvecDemande(t),
@@ -182,11 +183,12 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     deciderEscalade: decision,
     arretGlobal,
     ordonnanceur,
-    // Les tâches en cours restent « en cours » : au prochain démarrage, elles reprennent leur étape depuis le début.
+    // Les étapes interrompues par l'arrêt passent en pause erreur_api et seront relancées par l'ordonnanceur ; les tâches « en cours » à l'arrêt brutal reprennent leur étape au redémarrage.
     arreter: async () => {
-      // Conteneurs d'abord, pour qu'une étape longue ne retienne pas l'attente de l'ordonnanceur.
+      // Le minuteur s'arrête tout de suite ; les conteneurs sont arrêtés pendant que l'ordonnanceur attend les étapes en vol.
+      const fin = ordonnanceur.arreter();
       await arreterConteneurs(docker);
-      await ordonnanceur.arreter();
+      await fin;
       await fermer(serveurUi);
       await fermer(serveurConteneurs);
       db.close();
