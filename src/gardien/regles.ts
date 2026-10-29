@@ -26,7 +26,7 @@ export const LISTE_NOIRE: [RegExp, string][] = [
   [/\bprintenv\b|\/proc\/\S*\/environ|\bexport\s+-p\b|\bdeclare\s+-[a-zA-Z]*x|(^|[\s;&|(])(env|set)\s*($|[|;&>)])/, ENV],
   [/\$\{?[A-Za-z_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD|JETON|ANTHROPIC|CREDENTIAL)/i, ENV],
   [/\bos\.environ\b|\bprocess\.env\b|\bgetenv\b|GetEnvironmentVariable/, ENV],
-  [/(^|[\s'"=/<])\.env(\.[\w.-]+)?($|[\s'";|&>)])|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.ssh\/|\.aws\/|\.azure\/|\.docker\/config\.json|\.git-credentials|\.netrc\b|\.(pem|pfx|p12|key)($|[\s'";|&>)])|\bsecrets\.json\b/i, 'accès à des fichiers de secrets'],
+  [/(^|[\s'"=/<:])\.env(\.[\w.-]+)?($|[\s'";|&>)])|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.ssh\/|\.aws\/|\.azure\/|\.docker\/config\.json|\.git-credentials|\.netrc\b|\.(pem|pfx|p12|key)($|[\s'";|&>)])|\bsecrets\.json\b/i, 'accès à des fichiers de secrets'],
   [/docker\.sock|\b(docker|podman|kubectl|nerdctl)\b/, 'accès au socket Docker'],
   [/\/etc\/claude-code|managed-settings|\/opt\/hooks|\.etat-claude|CLAUDE_CONFIG_DIR|hook-gardien/, 'modification de la configuration Claude Code ou des hooks'],
   [/\.git\/(hooks|config)\b/, 'modification des internes Git'],
@@ -45,7 +45,7 @@ const dans = (racine: string, abs: string) => abs === racine || abs.startsWith(`
 
 // Le message d'un commit est une donnée : il n'est pas soumis à la liste noire.
 function texteAControler(mots: string[]): string {
-  if (mots[0] !== 'git') return mots.join(' ');
+  if (mots[0] !== 'git' || sousCommandeGit(mots) !== 'commit') return mots.join(' ');
   return mots.filter((_, i) => mots[i - 1] !== '-m' && mots[i - 1] !== '--message').join(' ');
 }
 
@@ -67,6 +67,8 @@ const OPTIONS_NG_TEST = /^--(code-coverage|watch=false|no-watch|browsers=[\w,]+|
 const OPTIONS_NPM_CI = new Set(['--ignore-scripts', '--no-audit', '--no-fund', '--prefer-offline']);
 const LECTURE = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'find', 'pwd', 'tree', 'diff', 'echo', 'stat', 'file']);
 const FIND_INTERDIT = /^-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/;
+// Option sans valeur attachée : la valeur, si elle existe, est un mot séparé (donc vérifié par args).
+const OPTION_SIMPLE = /^-[A-Za-z0-9]+$|^--[a-z][a-z-]*$/;
 
 function listeBlanche(mots: string[], racine: string): string | null {
   const [m0, m1] = mots;
@@ -76,11 +78,11 @@ function listeBlanche(mots: string[], racine: string): string | null {
   if (m0 === 'dotnet' && (m1 === 'build' || m1 === 'test') && args(2, o => OPTIONS_DOTNET.has(o) || o.startsWith('--collect:')))
     return m1 === 'test' ? 'tests' : 'commande de build';
   if (m0 === 'dotnet' && m1 === 'restore' && mots.includes('--locked-mode') && args(2, o => OPTIONS_DOTNET.has(o))) return 'restauration verrouillée';
-  const ng = m0 === 'ng' ? 1 : m0 === 'npx' && m1 === 'ng' ? 2 : 0;
+  const ng = m0 === 'ng' ? 1 : 0;
   if (ng && mots[ng] === 'test' && args(ng + 1, o => OPTIONS_NG_TEST.test(o))) return 'tests front';
   if (m0 === 'npm' && m1 === 'ci' && args(2, o => OPTIONS_NPM_CI.has(o))) return 'installation verrouillée';
   if (m0 === 'git' && sousCommandeGit(mots) === m1) {
-    if (['status', 'diff', 'log', 'show'].includes(m1) && args(2, o => !/^--(output|ext-diff|textconv)/.test(o))) return 'lecture Git';
+    if (['status', 'diff', 'log', 'show'].includes(m1) && args(2, o => OPTION_SIMPLE.test(o) && !/^--(output|ext-diff|textconv)/.test(o))) return 'lecture Git';
     if (m1 === 'add' && args(2, o => ['-A', '--all', '-u', '--update'].includes(o))) return 'ajout au commit';
     if (m1 === 'commit') {
       for (let i = 2; i < mots.length; i++) {
@@ -90,7 +92,8 @@ function listeBlanche(mots: string[], racine: string): string | null {
       return 'commit sur la branche de la tâche';
     }
   }
-  if (LECTURE.has(m0) && args(1, o => !(m0 === 'find' && FIND_INTERDIT.test(o)))) return 'lecture du projet';
+  if (LECTURE.has(m0) && args(1, o => OPTION_SIMPLE.test(o) && !(m0 === 'find' && FIND_INTERDIT.test(o)) && !(m0 === 'rg' && /^--pre(-glob)?$/.test(o))))
+    return 'lecture du projet';
   return null;
 }
 
@@ -118,6 +121,7 @@ export const PROTEGES: RegExp[] = [
   /^\.github\//, /(^|\/)\.gitlab-ci\.yml$/, /(^|\/)azure-pipelines[^/]*\.ya?ml$/, /(^|\/)Jenkinsfile$/,
   /(^|\/)(Dockerfile|Containerfile)[^/]*$/i, /(^|\/)docker-compose[^/]*\.ya?ml$/, /(^|\/)\.devcontainer\//,
   /(^|\/)\.claude\//, /(^|\/)CLAUDE\.md$/, /(^|\/)\.mcp\.json$/, /(^|\/)(nuget\.config|\.npmrc|\.yarnrc(\.yml)?)$/i,
+  /(^|\/)Directory\.Build\.(props|targets)$/, /(^|\/)global\.json$/, /(^|\/)\.config\/dotnet-tools\.json$/, /(^|\/)\.husky\//, /(^|\/)\.vscode\//,
   /(^|[/._-])(Auth|Authentication|Authorization|Jwt|OAuth|Oidc|Identity|Security)(?![a-z])/,
   /(^|[/._-])(auth|authentication|authorization|jwt|oauth|oidc|identity|security)([/._-]|$)/,
 ];
@@ -137,7 +141,7 @@ export function evaluerFichier(chemin: string, mode: 'lecture' | 'ecriture', rac
 }
 
 // Fichiers dont le contenu est exécuté par le build ou les tests.
-const FICHIERS_EXECUTES = /\.(sh|bash|zsh|ps1|psm1|cmd|bat|csproj|fsproj|vbproj|props|targets|mjs|cjs)$|(^|\/)(package\.json|karma\.conf\.(js|cjs|mjs|ts)|angular\.json|Makefile)$/i;
+const FICHIERS_EXECUTES = /\.(sh|bash|zsh|ps1|psm1|cmd|bat|csproj|fsproj|vbproj|props|targets|mjs|cjs|proj|rsp|runsettings)$|(^|\/)(package\.json|karma\.conf\.(js|cjs|mjs|ts)|angular\.json|Makefile)$/i;
 
 export function evaluerContenu(chemin: string, contenu: string, toujours = false): VerdictDecide | null {
   if (!toujours && !FICHIERS_EXECUTES.test(chemin)) return null;

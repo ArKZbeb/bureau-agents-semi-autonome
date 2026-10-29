@@ -38,19 +38,49 @@ export function motsSimples(commande: string): string[] | null {
 
 const LANCEURS = /^((ba|z|da|k)?sh|source|\.|node|python3?|perl|ruby|pwsh|deno|bun|tsx|ts-node)$/;
 
+const ENVELOPPES = new Set(['env', 'nohup', 'exec', 'command', 'time', 'nice', 'timeout', 'xargs']);
+// Options, durées, nombres et signaux qui suivent une enveloppe (heuristique : le gardien évalue aussi la commande brute).
+const MOTS_ENVELOPPE = /^(-|[\d.]+[smhd]?$|[A-Z]+$)/;
+const SHELL = /^(ba|z|da|k)?sh$/;
+const MOT = /(?:[^\s"']+|"[^"]*"|'[^']*')+/g;
+
+// Option qui fait exécuter du code en ligne (pas un fichier) : sh -c, node -e, python3 -c, node --eval…
+function enLigne(lanceur: string, option: string): boolean {
+  return SHELL.test(lanceur) ? /^-\w*c\w*$/.test(option) : /^(-[cmep]|--eval|--print)$/.test(option);
+}
+
+function sansEnveloppes(mots: string[]): string[] {
+  let i = 0;
+  while (i < mots.length) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(mots[i])) i++;
+    else if (ENVELOPPES.has(mots[i])) {
+      i++;
+      while (i < mots.length && MOTS_ENVELOPPE.test(mots[i])) i++;
+    } else break;
+  }
+  return mots.slice(i);
+}
+
 /** Fichiers exécutés par une commande, pour que le gardien lise leur contenu avant de laisser passer. */
 export function fichiersExecutes(commande: string): string[] {
   const fichiers: string[] = [];
-  for (const segment of commande.split(/&&|\|\||[;|\n]/)) {
-    const mots = segment.trim().split(/\s+/).filter(Boolean);
-    while (mots.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(mots[0])) mots.shift();
-    const [m0, m1] = mots;
+  const nettoyer = (f: string) => f.replace(/["']/g, '');
+  for (const segment of commande.split(/&&|\|\||[;|\n&()]/)) {
+    const REDIRECTION = /<\s*((?:[^\s"'<>]+|"[^"]*"|'[^']*')+)/g;
+    for (const r of segment.matchAll(REDIRECTION)) fichiers.push(nettoyer(r[1]));
+    const mots = sansEnveloppes((segment.replace(REDIRECTION, ' ').match(MOT) ?? []).map(nettoyer));
+    const m0 = mots[0];
     if (!m0) continue;
     if (LANCEURS.test(m0)) {
-      if (m1 && !m1.startsWith('-')) fichiers.push(m1);
+      for (const o of mots.slice(1)) {
+        if (enLigne(m0, o)) break;
+        if (o.startsWith('-')) continue;
+        fichiers.push(o);
+        break;
+      }
     } else if (m0.includes('/')) fichiers.push(m0);
   }
-  return fichiers.map(f => f.replace(/^["']|["']$/g, ''));
+  return fichiers;
 }
 
 const OPTIONS_GLOBALES_DANGEREUSES = /^(-c|--config-env|--exec-path|--git-dir|--work-tree|--namespace|--super-prefix)(=|$)/;
