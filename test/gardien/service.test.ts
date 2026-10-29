@@ -299,4 +299,30 @@ test('implémenteur : écriture dans les zones du plan toujours possible', async
   const { db, deps } = monter();
   definirAgent(db, 'T-45', 'implementeur');
   assert.notEqual(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'deny');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'allow');
+});
+
+test('plan altéré : écriture du cadreur refusée et tâche en pause', async () => {
+  const { db, deps, escalades } = monter();
+  definirAgent(db, 'T-45', 'cadreur');
+  db.prepare("UPDATE artefacts SET contenu = contenu || '\n- `**`' WHERE type = 'plan'").run();
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/spec.md', '# Spec'))), 'deny');
+  assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
+  assert.match(lireTache(db, 'T-45').raison ?? '', /^integrite/);
+  assert.deepEqual(escalades, ['T-45']);
+});
+
+test('cadreur : Edit hors des deux fichiers refusé', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'cadreur');
+  const edit = { tool_name: 'Edit', tool_input: { file_path: '/workspace/cadrage/spec.md.bak', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_bak' };
+  assert.equal(decision(await decider(deps, 'T-45', edit)), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'le cadreur n’écrit que spec.md et plan.md');
+});
+
+test('agent inconnu : écriture refusée', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'inconnu');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
 });

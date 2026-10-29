@@ -124,15 +124,6 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   if (tache.statut !== 'en_cours') return enPause();
   if (!entreeValide(outil, entree)) return refusListe('appel invalide');
 
-  if (OUTILS_ECRITURE.has(outil) && tache.agent !== null && !AGENTS_ECRITURE.has(tache.agent))
-    return refusListe('agent en lecture seule : Write et Edit retirés');
-  if (OUTILS_ECRITURE.has(outil) && tache.agent === 'cadreur') {
-    const chemin = path.posix.resolve(RACINE, String(entree.file_path));
-    if (!FICHIERS_CADRAGE.has(chemin)) return refusListe('le cadreur n’écrit que spec.md et plan.md');
-    if ((await deps.resoudreChemin(tacheId, chemin)) !== chemin) return refusListe('écriture via un lien symbolique');
-    return { decision: 'Autorisé', decideur: 'Liste blanche', couche: '2', raison: 'document du cadreur' };
-  }
-
   // Plan d'abord : une altération arrête aussi les appels déjà approuvés.
   let plan: string | null;
   try {
@@ -144,6 +135,16 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
     return { decision: 'Refusé', decideur: 'Contrôleur d’intégrité', couche: '—', raison: err.message };
   }
   const ctx: Contexte = { tacheId, titre: tache.titre, plan, zones: zonesDuPlan(plan) };
+
+  // Droit d'écriture par agent : après le contrôle d'intégrité du plan, pour qu'une altération arrête aussi ces appels.
+  if (OUTILS_ECRITURE.has(outil) && tache.agent !== null && !AGENTS_ECRITURE.has(tache.agent))
+    return refusListe('agent en lecture seule : Write et Edit retirés');
+  if (OUTILS_ECRITURE.has(outil) && tache.agent === 'cadreur') {
+    const chemin = path.posix.resolve(RACINE, String(entree.file_path));
+    if (!FICHIERS_CADRAGE.has(chemin)) return refusListe('le cadreur n’écrit que spec.md et plan.md');
+    if ((await deps.resoudreChemin(tacheId, chemin)) !== chemin) return refusListe('écriture via un lien symbolique');
+    return { decision: 'Autorisé', decideur: 'Liste blanche', couche: '2', raison: 'document du cadreur' };
+  }
 
   // Un lien du dépôt (src/x → ../.git/hooks/pre-commit) ne doit pas déguiser la cible réelle.
   const ecriture = OUTILS_ECRITURE.has(outil);
