@@ -46,3 +46,16 @@ for (const [nom, alterer] of alterations) {
 test('une autre clé ne valide pas la chaîne', () => {
   assert.throws(() => verifierJournal(journalDeTrois(), Buffer.alloc(32, 9)), AnomalieIntegrite);
 });
+
+// Une écriture après une suppression ne doit jamais effacer la trace de cette suppression.
+for (const [nom, alterer] of [
+  ['dernière ligne supprimée', (db: Base) => db.prepare('DELETE FROM journal WHERE id = 3').run()],
+  ['tête supprimée', (db: Base) => db.prepare('DELETE FROM journal_tete').run()],
+] as const) {
+  test(`altération toujours détectée après un nouvel ajout : ${nom}`, () => {
+    const db = journalDeTrois();
+    alterer(db);
+    ajouterAuJournal(db, cle, { tacheId: 'T-41', type: 'decision', outil: 'Bash', couche: '2', commande: 'dotnet test', decision: 'Autorisé', decideur: 'Liste blanche', raison: 'tests' });
+    assert.throws(() => verifierJournal(db, cle), AnomalieIntegrite);
+  });
+}

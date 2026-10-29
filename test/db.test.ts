@@ -8,7 +8,7 @@ import { ouvrirBase, enTransaction } from '../src/db.ts';
 test('crée toutes les tables', () => {
   const db = ouvrirBase(':memory:');
   const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as { name: string }[]).map(t => t.name);
-  assert.deepEqual(tables, ['artefacts', 'autorisations', 'escalades', 'journal', 'journal_tete', 'taches']);
+  assert.deepEqual(tables, ['artefacts', 'artefacts_tete', 'autorisations', 'escalades', 'journal', 'journal_tete', 'taches']);
 });
 
 test('les données survivent à la réouverture', () => {

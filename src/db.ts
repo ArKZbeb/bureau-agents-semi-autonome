@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS artefacts (
   id INTEGER PRIMARY KEY, tache_id TEXT NOT NULL, type TEXT NOT NULL, contenu TEXT NOT NULL,
   sha256 TEXT NOT NULL, hmac TEXT NOT NULL, cree_le TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS artefacts_tete (
+  tache_id TEXT NOT NULL, type TEXT NOT NULL, nombre INTEGER NOT NULL, empreinte TEXT NOT NULL, signature TEXT NOT NULL,
+  PRIMARY KEY (tache_id, type)
+);
 CREATE TABLE IF NOT EXISTS journal (
   id INTEGER PRIMARY KEY, tache_id TEXT NOT NULL, horodatage TEXT NOT NULL, type TEXT NOT NULL,
   outil TEXT, commande TEXT NOT NULL, couche TEXT NOT NULL, decision TEXT NOT NULL,
