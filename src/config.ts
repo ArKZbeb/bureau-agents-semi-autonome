@@ -3,6 +3,13 @@ import path from 'node:path';
 
 export type Tarifs = Record<string, { entree: number; sortie: number }>;
 
+export type NomModele = 'cadreur' | 'patron' | 'implementeur' | 'reviewer' | 'qa' | 'controleur';
+
+const MODELES: Record<NomModele, string> = {
+  cadreur: 'claude-opus-5-5', patron: 'claude-opus-5-5', implementeur: 'claude-sonnet-5-5',
+  reviewer: 'claude-sonnet-5-5', qa: 'claude-opus-5-5', controleur: 'claude-haiku-5-5',
+};
+
 export type Config = {
   dossierDonnees: string;
   portUi: number;
@@ -14,6 +21,8 @@ export type Config = {
   tarifs: Tarifs;
   domainesAutorises: string[];
   conteneur: { memoire: number; cpus: number; pids: number };
+  modeles: Record<NomModele, string>;
+  tachesSimultanees: number;
 };
 
 // $ par million de tokens
@@ -36,5 +45,7 @@ export function chargerConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tarifs: TARIFS,
     domainesAutorises: ['registry.npmjs.org', 'api.nuget.org', 'nuget.org'],
     conteneur: { memoire: 4 * 1024 ** 3, cpus: 2, pids: 512 },
+    modeles: Object.fromEntries(Object.entries(MODELES).map(([nom, defaut]) => [nom, env[`BUREAU_MODELE_${nom.toUpperCase()}`] ?? defaut])) as Record<NomModele, string>,
+    tachesSimultanees: Number(env.BUREAU_TACHES_SIMULTANEES ?? 2),
   };
 }

@@ -21,3 +21,13 @@ test('surcharges par variables d’environnement', () => {
   assert.equal(c.urlApiAmont, 'http://127.0.0.1:9');
   assert.equal(c.cleApi, 'k');
 });
+
+test('modèles par agent : valeurs de la maquette, surcharge par variable', () => {
+  const c = chargerConfig({});
+  assert.deepEqual(c.modeles, {
+    cadreur: 'claude-opus-5-5', patron: 'claude-opus-5-5', implementeur: 'claude-sonnet-5-5',
+    reviewer: 'claude-sonnet-5-5', qa: 'claude-opus-5-5', controleur: 'claude-haiku-5-5',
+  });
+  assert.equal(c.tachesSimultanees, 2);
+  assert.equal(chargerConfig({ BUREAU_MODELE_QA: 'claude-sonnet-5-5' }).modeles.qa, 'claude-sonnet-5-5');
+});
