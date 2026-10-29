@@ -34,6 +34,9 @@ export const OUTIL_SORTIE = 'StructuredOutput';
 const OUTILS_INTERNES = new Set(['Task', 'Agent', 'TodoWrite', 'ToolSearch', 'Skill', 'TaskStop', OUTIL_SORTIE]);
 const OUTILS_LECTURE = new Set(['Read', 'Glob', 'Grep', 'LS']);
 const OUTILS_ECRITURE = new Set(['Write', 'Edit']);
+// Droit d'écriture imposé hors de l'agent : le cadreur (spec et plan) et l'implémenteur gardent Write et Edit.
+export const AGENTS_ECRITURE = new Set(['implementeur', 'cadreur']);
+export const FICHIERS_CADRAGE = new Set(['/workspace/cadrage/spec.md', '/workspace/cadrage/plan.md']);
 const MAX_CONTENU = 20_000;
 const SCRIPTS_NPM = /\bnpm\s+(run|run-script|test|start)\b/;
 const SECRETS_MOTIF = /(^|[\/*])\.env|id_(rsa|ed25519|ecdsa|dsa)|\.ssh|\.aws|\.azure|\.git-credentials|\.netrc|\.(pem|pfx|p12|key)\b|secrets\.json/i;
@@ -120,6 +123,15 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   const tache = lireTache(deps.db, tacheId);
   if (tache.statut !== 'en_cours') return enPause();
   if (!entreeValide(outil, entree)) return refusListe('appel invalide');
+
+  if (OUTILS_ECRITURE.has(outil) && tache.agent !== null && !AGENTS_ECRITURE.has(tache.agent))
+    return refusListe('agent en lecture seule : Write et Edit retirés');
+  if (OUTILS_ECRITURE.has(outil) && tache.agent === 'cadreur') {
+    const chemin = path.posix.resolve(RACINE, String(entree.file_path));
+    if (!FICHIERS_CADRAGE.has(chemin)) return refusListe('le cadreur n’écrit que spec.md et plan.md');
+    if ((await deps.resoudreChemin(tacheId, chemin)) !== chemin) return refusListe('écriture via un lien symbolique');
+    return { decision: 'Autorisé', decideur: 'Liste blanche', couche: '2', raison: 'document du cadreur' };
+  }
 
   // Plan d'abord : une altération arrête aussi les appels déjà approuvés.
   let plan: string | null;

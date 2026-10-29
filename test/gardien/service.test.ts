@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ouvrirBase } from '../../src/db.ts';
-import { creerTache, appliquer, lireTache } from '../../src/taches/depot.ts';
+import { creerTache, appliquer, definirAgent, lireTache } from '../../src/taches/depot.ts';
 import { enregistrerArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal, verifierJournal } from '../../src/integrite/journal.ts';
 import { decider, deciderEscalade, OUTIL_SORTIE, type DepsGardien, type EntreeHook } from '../../src/gardien/service.ts';
@@ -275,4 +275,28 @@ test('outil de sortie structurée autorisé comme outil interne', async () => {
   const { deps } = monter();
   const s = await decider(deps, 'T-45', { tool_name: OUTIL_SORTIE, tool_input: { resume: 'fait' }, tool_use_id: 'toolu_so' });
   assert.equal(decision(s), 'allow');
+});
+
+test('agent en lecture seule : écriture refusée, lecture et Bash inchangés', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'reviewer');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  const [refus] = lireJournal(db, 'T-45');
+  assert.deepEqual([refus.decideur, refus.raison], ['Liste noire', 'agent en lecture seule : Write et Edit retirés']);
+  assert.equal(decision(await decider(deps, 'T-45', bash('dotnet test'))), 'allow');
+});
+
+test('cadreur : seulement spec.md et plan.md du dossier de cadrage', async () => {
+  const { db, deps } = monter({ liens: { '/workspace/cadrage/plan.md': '/workspace/projet/.git/hooks/pre-commit' } });
+  definirAgent(db, 'T-45', 'cadreur');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/spec.md', '# Spec'))), 'allow');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/plan.md', '# Plan'))), 'deny', 'lien symbolique refusé');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'le cadreur n’écrit que spec.md et plan.md');
+});
+
+test('implémenteur : écriture dans les zones du plan toujours possible', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'implementeur');
+  assert.notEqual(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'deny');
 });
