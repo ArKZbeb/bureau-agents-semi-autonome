@@ -263,3 +263,10 @@ test('deux escalades simultanées : une seule escalade, l’autre appel refusé'
   assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
   verifierJournal(db, cle);
 });
+
+test('pause d’intégrité levée par le gardien : l’arrêt du conteneur est demandé', async () => {
+  const { db, deps, escalades } = monter();
+  db.prepare("UPDATE artefacts SET contenu = contenu || '\n- `**`'").run();
+  assert.equal(decision(await decider(deps, 'T-45', bash('git status'))), 'deny');
+  assert.deepEqual(escalades, ['T-45']);
+});

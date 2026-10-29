@@ -23,6 +23,7 @@ export type DepsGardien = {
   resoudreChemin: (tacheId: string, chemin: string) => Promise<string | null>;
   avis: (demande: DemandeAvis) => Promise<Avis>;
   fiche: (d: Dependance) => Promise<Fiche>;
+  /** Tâche mise en pause par le gardien (escalade ou intégrité) : l'exécution arrête le conteneur. */
   surEscalade: (tacheId: string) => void;
 };
 
@@ -126,6 +127,7 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   } catch (err) {
     if (!(err instanceof AnomalieIntegrite)) throw err;
     appliquer(deps.db, tacheId, { type: 'pause', raison: 'integrite', detail: err.message });
+    deps.surEscalade(tacheId); // même effet qu'une escalade : le conteneur en cours est arrêté
     return { decision: 'Refusé', decideur: 'Contrôleur d’intégrité', couche: '—', raison: err.message };
   }
   const ctx: Contexte = { tacheId, titre: tache.titre, plan, zones: zonesDuPlan(plan) };
