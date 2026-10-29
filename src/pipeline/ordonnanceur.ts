@@ -4,13 +4,19 @@ import { avancer as avancerParDefaut, type DepsPipeline } from './pipeline.ts';
 
 export type OptionsOrdonnanceur = { simultanees: number; intervalleMs: number; delaisErreurApiMs: number[]; horloge?: () => number };
 type Avancer = (deps: DepsPipeline, tacheId: string) => Promise<Tache>;
+type Suivi = {
+  n: number;          // reprises déjà faites par l'ordonnanceur
+  depuis: number;     // instant où la pause erreur_api suivante a été observée
+  pauseVue: boolean;  // la pause suivant la reprise n-1 a-t-elle été observée ?
+  epuise: boolean;
+};
 
 const estErreurApi = (t: Tache) => t.statut === 'en_pause' && (t.raison ?? '').startsWith('erreur_api');
 
 export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, avancer: Avancer = avancerParDefaut) {
   const horloge = o.horloge ?? Date.now;
   const enVol = new Map<string, Promise<void>>();
-  const tentatives = new Map<string, { n: number; depuis: number; epuise: boolean }>();
+  const tentatives = new Map<string, Suivi>();
   let minuteur: NodeJS.Timeout | undefined;
   let enTour = false;
 
@@ -30,9 +36,14 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
     try {
       const maintenant = horloge();
       for (const t of listerTaches(deps.db)) {
-        // Le compteur vit tant que la tâche peut encore être relancée (y compris pendant une relance en cours).
-        if (!estErreurApi(t)) { if (!['prete', 'en_cours'].includes(t.statut)) tentatives.delete(t.id); continue; }
-        const suivi = tentatives.get(t.id) ?? { n: 0, depuis: maintenant, epuise: false };
+        if (!estErreurApi(t)) {
+          // Hors pause erreur_api, le compteur ne survit qu'à une relance par l'ordonnanceur (prête ou en cours).
+          // Une reprise humaine d'une tâche épuisée repart de zéro.
+          const suivi = tentatives.get(t.id);
+          if (suivi?.epuise || !['prete', 'en_cours'].includes(t.statut)) tentatives.delete(t.id);
+          continue;
+        }
+        const suivi = tentatives.get(t.id) ?? { n: 0, depuis: maintenant, pauseVue: false, epuise: false };
         tentatives.set(t.id, suivi);
         if (suivi.epuise) continue;
         if (suivi.n >= o.delaisErreurApiMs.length) {
@@ -40,8 +51,15 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
           ajouterAuJournal(deps.db, deps.cle, { tacheId: t.id, type: 'evenement', commande: 'nouvelle tentative', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: 'nouvelles tentatives épuisées : à reprendre à la main' });
           continue;
         }
+        if (!suivi.pauseVue) {
+          // Le délai se compte depuis cette observation : une étape plus longue que le délai ne provoque pas de relance immédiate.
+          suivi.depuis = maintenant;
+          suivi.pauseVue = true;
+          continue;
+        }
         if (maintenant - suivi.depuis >= o.delaisErreurApiMs[suivi.n]) {
-          tentatives.set(t.id, { n: suivi.n + 1, depuis: maintenant, epuise: false });
+          suivi.n++;
+          suivi.pauseVue = false;
           appliquer(deps.db, t.id, { type: 'reprise' });
         }
       }
@@ -54,10 +72,19 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
     }
   };
 
+  // Une erreur de tour (base, horloge) est journalisée : le minuteur ne laisse jamais de promesse rejetée.
+  const journaliserErreurTour = (e: unknown) => {
+    try {
+      ajouterAuJournal(deps.db, deps.cle, { tacheId: '—', type: 'evenement', commande: 'ordonnancement', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
+    } catch {
+      // Base indisponible : rien de plus à faire, le tour suivant réessaiera.
+    }
+  };
+
   return {
     tour,
     enVol: () => [...enVol.keys()],
-    demarrer: () => { minuteur ??= setInterval(() => void tour(), o.intervalleMs); },
+    demarrer: () => { minuteur ??= setInterval(() => void tour().catch(journaliserErreurTour), o.intervalleMs); },
     arreter: async () => { clearInterval(minuteur); minuteur = undefined; await Promise.all(enVol.values()); },
   };
 }
