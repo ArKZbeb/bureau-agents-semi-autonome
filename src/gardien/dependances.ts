@@ -56,7 +56,9 @@ function sansEnveloppes(mots: string[]): string[] {
 export function dependancesCommande(commande: string): Dependance[] {
   const res: Dependance[] = [];
   // ponytail: découpe naïve ; les guillemets sont retirés, pas interprétés. Le gardien évalue aussi la commande brute.
-  for (const segment of commande.replace(/['"]/g, '').split(/&&|\|\||[;|&\n()`]|\$\(/)) {
+  // Redirections (2>&1, > log, < entrée) retirées avant la découpe sur « & ».
+  const nettoyee = commande.replace(/['"]/g, '').replace(/\d*>&\d+|\d*>>?\s*\S+|<\s*\S+/g, ' ');
+  for (const segment of nettoyee.split(/&&|\|\||[;|&\n()`]|\$\(/)) {
     const mots = sansEnveloppes(segment.trim().split(/\s+/).filter(Boolean));
     const [m0, m1, m2] = mots;
     if (m0 === 'npm' || m0 === 'pnpm' || m0 === 'yarn') {
@@ -137,9 +139,11 @@ const osv = (f: typeof fetch, d: Dependance, version: string | null) =>
 
 // Sources non registre (git, URL, chemin, alias npm…) : jamais une fiche rassurante.
 const SOURCE_HORS_REGISTRE = /^(npm:|git|github:|gitlab:|bitbucket:|https?:|file:|link:|workspace:|\/|\.|~\/)/;
+// Forme raccourcie GitHub : user/repo ou user/repo#ref
+const FORME_GITHUB = /^[\w.-]+\/[\w.-]+(#.*)?$/;
 
 function horsRegistre(d: Dependance): boolean {
-  if (d.version && SOURCE_HORS_REGISTRE.test(d.version)) return true;
+  if (d.version && (SOURCE_HORS_REGISTRE.test(d.version) || FORME_GITHUB.test(d.version))) return true;
   if (d.nom.includes(':')) return true;
   return d.nom.includes('/') && !/^@[^/]+\/[^/]+$/.test(d.nom);
 }

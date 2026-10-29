@@ -77,6 +77,26 @@ test('spécification hors registre : refus sans aucun appel réseau', async () =
   assert.deepEqual(appels, []);
 });
 
+test('forme GitHub user/repo hors registre : refus sans appel réseau', async () => {
+  const { f, appels } = fetchCompte();
+  const [d] = dependancesCommande('npm i foo@user/repo');
+  assert.deepEqual(d, { ecosysteme: 'npm', nom: 'foo', version: 'user/repo' });
+  const fiche = await ficheDependance(d, f);
+  assert.equal(fiche.existe, false);
+  assert.equal(fiche.erreur, 'source hors registre');
+  assert.deepEqual(appels, []);
+  const depuisFichier = dependancesFichier('/workspace/projet/package.json', '{}', JSON.stringify({ dependencies: { foo: 'user/repo#main' } }));
+  assert.deepEqual(depuisFichier, [{ ecosysteme: 'npm', nom: 'foo', version: 'user/repo#main' }]);
+  const fiche2 = await ficheDependance(depuisFichier![0], f);
+  assert.equal(fiche2.erreur, 'source hors registre');
+  assert.deepEqual(appels, []);
+});
+
+test('redirections ignorées lors de la détection', () => {
+  assert.deepEqual(dependancesCommande('npm i x 2>&1'), [{ ecosysteme: 'npm', nom: 'x', version: null }]);
+  assert.deepEqual(dependancesCommande('npm i x > log.txt'), [{ ecosysteme: 'npm', nom: 'x', version: null }]);
+});
+
 test('nom ressemblant à une source hors registre : refus sans appel réseau', async () => {
   const { f, appels } = fetchCompte();
   const fiche = await ficheDependance({ ecosysteme: 'npm', nom: 'evil/pkg', version: null }, f);
