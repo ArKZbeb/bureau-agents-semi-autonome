@@ -1,6 +1,7 @@
 import http, { type IncomingHttpHeaders } from 'node:http';
+import { OUTIL_SORTIE } from '../../src/gardien/service.ts';
 
-export type Tour = { outil?: { nom: string; entree: Record<string, unknown> }; texte?: string; delaiMs?: number };
+export type Tour = { outil?: { nom: string; entree: Record<string, unknown> }; texte?: string; delaiMs?: number; sortie?: Record<string, unknown> };
 export type Requete = { chemin: string; cleApi: string | undefined; corps: any; entetes: IncomingHttpHeaders };
 export type FausseApi = { url: string; requetes: Requete[]; fermer: () => Promise<void> };
 
@@ -20,7 +21,8 @@ export async function demarrerFausseApi(tours: Tour[]): Promise<FausseApi> {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ input_tokens: 10 }));
     }
-    const tour: Tour = corps.tools?.length ? tours[index++] ?? { texte: 'FIN' } : { texte: 'APPEL ANNEXE' };
+    const prevu: Tour = corps.tools?.length ? tours[index++] ?? { texte: 'FIN' } : { texte: 'APPEL ANNEXE' };
+    const tour: Tour = prevu.sortie ? { ...prevu, outil: { nom: OUTIL_SORTIE, entree: prevu.sortie } } : prevu;
     if (tour.delaiMs) await new Promise(r => setTimeout(r, tour.delaiMs));
     n++;
     const bloc = tour.outil

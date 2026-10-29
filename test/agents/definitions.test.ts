@@ -13,6 +13,7 @@ test('chaque étape a un agent, un prompt avec le socle et un schéma objet', ()
     assert.ok(a.promptSysteme.startsWith(socle), `${etape} : socle en tête`);
     assert.ok(a.promptSysteme.length > socle.length + 200, `${etape} : rôle présent`);
     assert.equal((a.schema as { type: string }).type, 'object', `${etape} : schéma objet`);
+    assert.ok(!('$schema' in a.schema!), `${etape} : pas de méta-schéma 2020-12, que Claude Code refuse dans --json-schema`);
   }
 });
 

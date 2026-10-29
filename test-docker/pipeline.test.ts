@@ -1,0 +1,129 @@
+import { describe, test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import Docker from 'dockerode';
+import { chargerConfig } from '../src/config.ts';
+import { chargerOuCreerCle } from '../src/integrite/cle.ts';
+import { ecrireManifeste } from '../src/integrite/manifeste.ts';
+import { lireJournal, verifierJournal } from '../src/integrite/journal.ts';
+import { lireArtefact, type TypeArtefact } from '../src/integrite/artefacts.ts';
+import { construireImage } from '../src/conteneurs/image.ts';
+import { lireFichierVolume, nomRessource, RACINE_PROJET } from '../src/conteneurs/docker.ts';
+import { demarrerOrchestrateur, type Orchestrateur } from '../src/orchestrateur.ts';
+import { lireTache } from '../src/taches/depot.ts';
+import type { ClientAvis } from '../src/gardien/avis.ts';
+import { demarrerFausseApi, type FausseApi, type Tour } from '../test/outils/fausse-api.ts';
+
+const docker = new Docker();
+const RACINE_DEPOT = process.cwd();
+const CLE_SECRETE = 'cle-factice-de-test-ne-doit-jamais-entrer-dans-un-conteneur';
+const T = 'T-950';
+const ecrire = (file_path: string, content: string): Tour => ({ outil: { nom: 'Write', entree: { file_path, content } } });
+const bash = (command: string, description: string): Tour => ({ outil: { nom: 'Bash', entree: { command, description } } });
+
+// Ordre des requêtes avec outils : cadreur, patron (plan), implémenteur, reviewer, patron (code), QA.
+const tours: Tour[] = [
+  { sortie: { type: 'questions', questions: ['Format A4 ?'] } },
+  ecrire('/workspace/cadrage/spec.md', '# Spec\n\nExport PDF.\n\n## Critères d’acceptation\n\n1. Le fichier src/export.js existe\n'),
+  ecrire('/workspace/cadrage/plan.md', '# Plan\n\n## Zones touchées\n\n- `src/**`\n'),
+  ecrire(`${RACINE_PROJET}/src/cadreur.js`, 'x'),
+  { sortie: { type: 'proposition' } },
+  { sortie: { verdict: 'ok', note: 'Plan sûr.' } },
+  ecrire(`${RACINE_PROJET}/src/export.js`, 'export const exporter = () => "pdf";\n'),
+  bash('git add src/export.js && git commit -m "feat: export PDF"', 'commit'),
+  { sortie: { resume: 'src/export.js ajouté et commité.' } },
+  ecrire(`${RACINE_PROJET}/src/piege.js`, 'x'),
+  { sortie: { rapport: 'RAS.' } },
+  { sortie: { note: 'Bien.' } },
+  bash('ls src', 'vérification'),
+  { sortie: { verdict: 'go', criteres: [{ numero: 1, rempli: true, preuve: 'ls src : export.js' }] } },
+];
+
+let image: string;
+let o: Orchestrateur;
+let api: FausseApi;
+let cle: Buffer;
+
+function depotPiege(): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-piege-'));
+  fs.cpSync(path.join(RACINE_DEPOT, 'test/fixtures/repo-piege'), d, { recursive: true });
+  for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']]) execFileSync('git', args, { cwd: d });
+  return d;
+}
+
+const attendre = async () => { while (o.ordonnanceur.enVol().length) await new Promise(r => setTimeout(r, 200)); };
+const tourComplet = async () => { await o.ordonnanceur.tour(); await attendre(); };
+const etat = () => { const t = lireTache(o.db, T); return `${t.etape}/${t.statut}/${t.raison ?? ''}`; };
+const poster = async (route: string, corps: object) => {
+  const r = await fetch(`${o.urlUi}/api/taches/${T}/${route}`, {
+    method: 'POST', headers: { authorization: `Bearer ${o.jetonSession}`, 'content-type': 'application/json' }, body: JSON.stringify(corps),
+  });
+  assert.equal(r.status, 200, await r.clone().text());
+};
+
+describe('Parcours complet d’une story avec des agents simulés', () => {
+  before(async () => {
+    image = construireImage(RACINE_DEPOT);
+    const dossier = fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-donnees-'));
+    cle = chargerOuCreerCle(dossier);
+    ecrireManifeste(dossier, cle, RACINE_DEPOT, image);
+    api = await demarrerFausseApi(tours);
+    const clientAvis = {
+      messages: {
+        parse: async (p: { system: string }) => {
+          const controleur = String(p.system).includes('Contrôleur d\'intégrité');
+          return {
+            parsed_output: controleur ? { verdict: 'ok', constats: [] } : { decision: 'autoriser', raison: 'conforme au plan' },
+            stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 },
+          };
+        },
+      },
+    } as unknown as ClientAvis;
+    const config = { ...chargerConfig({ BUREAU_DONNEES: dossier }), portUi: 47320, portConteneurs: 47321, urlApiAmont: api.url, cleApi: CLE_SECRETE, delaiGardienMs: 5_000 };
+    o = await demarrerOrchestrateur({ config, racineDepot: RACINE_DEPOT, docker, clientAvis });
+    await o.ordonnanceur.arreter(); // le test pilote les tours lui-même
+    await o.creerTache({ id: T, projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: depotPiege(), budgetUsd: 20, demande: 'Exporter la fiche film en PDF' });
+  });
+  after(async () => {
+    await o?.arreter();
+    await api?.fermer();
+    await docker.getVolume(nomRessource(T)).remove({ force: true }).catch(() => {});
+    await docker.getVolume(`${nomRessource(T)}-controle`).remove({ force: true }).catch(() => {});
+  });
+
+  test('cadrage, validation, implémentation, review, patron, QA jusqu’à ma validation', async () => {
+    await tourComplet();
+    assert.equal(etat(), 'cadrage/attente_humain/le cadreur attend ta réponse');
+
+    await poster('reponse', { texte: 'Oui, A4.' });
+    for (let i = 0; i < 3 && lireTache(o.db, T).raison !== 'spec et plan à valider'; i++) await tourComplet();
+    assert.equal(etat(), 'cadrage/attente_humain/spec et plan à valider');
+
+    await poster('validation-cadrage', {});
+    for (let i = 0; i < 12 && lireTache(o.db, T).etape !== 'validation'; i++) await tourComplet();
+    assert.equal(etat().split('/').slice(0, 2).join('/'), 'validation/attente_humain');
+
+    const export_ = await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/export.js`);
+    assert.match(export_ ?? '', /exporter/);
+    assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/piege.js`), null, 'le reviewer n’a rien écrit');
+    assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/cadreur.js`), null, 'le cadreur n’a rien écrit hors spec et plan');
+
+    const journal = lireJournal(o.db, T);
+    assert.ok(journal.some(e => e.type === 'decision' && e.commande.includes('src/piege.js') && e.decision === 'Refusé' && e.decideur === 'Liste noire' && e.raison.includes('agent en lecture seule : Write et Edit retirés')));
+    assert.ok(journal.some(e => e.type === 'decision' && e.commande.includes('src/cadreur.js') && e.decision === 'Refusé' && e.raison.includes('le cadreur n’écrit que spec.md et plan.md')));
+
+    assert.match(lireArtefact(o.db, cle, T, 'spec')?.contenu ?? '', /Critères d’acceptation/);
+    assert.equal(lireArtefact(o.db, cle, T, 'criteres')?.contenu, '1. Le fichier src/export.js existe\n');
+    const types: TypeArtefact[] = ['spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'];
+    for (const type of types) assert.ok(lireArtefact(o.db, cle, T, type), `${type} lisible et signé`);
+
+    const volumes = (await docker.listVolumes()).Volumes ?? [];
+    assert.ok(!volumes.some(v => v.Name.startsWith(nomRessource(T)) && v.Name.endsWith('-controle')), 'aucune copie de contrôle ne subsiste');
+    verifierJournal(o.db, cle);
+    // La fausse API est en amont du proxy : la clé n'y arrive que ajoutée par le proxy, jamais fournie par un conteneur.
+    assert.ok(api.requetes.length > 0 && api.requetes.every(r => r.cleApi === CLE_SECRETE), 'clé ajoutée par le proxy de l’orchestrateur');
+  });
+});

@@ -37,13 +37,19 @@ export const DEFINITIONS: Record<EtapeAgent, Definition> = {
   qa: { agent: 'qa', fichier: 'qa.md', schema: SortieQa, espace: 'copie', maxTours: 80, dureeMaxMs: 30 * MIN },
 };
 
+// Claude Code valide --json-schema avec un Ajv qui ne connaît pas le méta-schéma 2020-12 : on retire la clé $schema.
+function schemaSansMeta(schema: z.ZodType): Record<string, unknown> {
+  const { $schema: _meta, ...reste } = z.toJSONSchema(schema) as Record<string, unknown>;
+  return reste;
+}
+
 export function agentPour(etape: EtapeAgent, config: Config, racineDepot: string): Agent {
   const d = DEFINITIONS[etape];
   const lire = (f: string) => fs.readFileSync(path.join(racineDepot, 'agents', f), 'utf8');
   return {
     nom: d.agent, modele: config.modeles[d.agent], maxTours: d.maxTours, dureeMaxMs: d.dureeMaxMs,
     promptSysteme: `${lire('socle.md')}\n\n${lire(d.fichier)}`,
-    schema: z.toJSONSchema(d.schema) as Record<string, unknown>,
+    schema: schemaSansMeta(d.schema),
   };
 }
 
