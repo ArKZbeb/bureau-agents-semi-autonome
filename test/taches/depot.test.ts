@@ -46,3 +46,13 @@ test('reprise après redémarrage : en cours → prête, pauses intactes', () =>
   assert.equal(lireTache(db, 'T-46').statut, 'en_pause');
   assert.match(lireTache(db, 'T-46').raison ?? '', /^integrite/);
 });
+
+test('reprise après redémarrage : la reprise de session est effacée, l’étape repart de zéro', () => {
+  const db = ouvrirBase(':memory:');
+  creerTache(db, T41);
+  appliquer(db, 'T-41', { type: 'demarrage' });
+  definirReprise(db, 'T-41', { sessionId: 's1', mode: 'message', message: 'Reprends.', empreinteTranscript: 'abc' });
+  assert.deepEqual(reprendreApresRedemarrage(db), ['T-41']);
+  assert.equal(lireTache(db, 'T-41').statut, 'prete');
+  assert.equal(lireTache(db, 'T-41').reprise, null);
+});

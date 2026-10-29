@@ -60,6 +60,9 @@ export function augmenterBudget(db: Base, id: string, usd: number): Tache {
 // Au démarrage, aucun conteneur ne survit : une étape « en cours » est relancée depuis son début.
 export function reprendreApresRedemarrage(db: Base): string[] {
   const ids = (db.prepare(`SELECT id FROM taches WHERE statut = 'en_cours'`).all() as { id: string }[]).map(l => l.id);
-  for (const id of ids) appliquer(db, id, { type: 'redemarrage' });
+  for (const id of ids) {
+    appliquer(db, id, { type: 'redemarrage' });
+    definirReprise(db, id, null);
+  }
   return ids;
 }
