@@ -15,7 +15,10 @@ const egal = (a: string, b: string) => timingSafeEqual(Buffer.from(sha256(a), 'h
 
 export function creerServeurUi(jetonSession: string, routes: RoutesUi): http.Server {
   return http.createServer((req, res) => {
-    traiter(jetonSession, routes, req, res).catch(e => repondreJson(res, 500, { erreur: (e as Error).message }));
+    traiter(jetonSession, routes, req, res).catch(e => {
+      if (res.headersSent) res.end();
+      else repondreJson(res, 500, { erreur: (e as Error).message });
+    });
   });
 }
 
@@ -33,9 +36,17 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
   if (req.method === 'GET' && url.pathname === '/api/escalades') return repondreJson(res, 200, routes.escalades());
   const escalade = /^\/api\/escalades\/(\d+)$/.exec(url.pathname);
   if (req.method === 'POST' && escalade) {
-    const corps = JSON.parse((await lireCorps(req, 100_000)).toString('utf8') || '{}') as { decision?: string; commentaire?: unknown };
-    if (corps.decision !== 'approuver' && corps.decision !== 'refuser') return repondreJson(res, 400, { erreur: 'decision attendue : approuver ou refuser' });
-    return repondreJson(res, 200, routes.deciderEscalade(Number(escalade[1]), corps.decision, String(corps.commentaire ?? '')));
+    const brut = await lireCorps(req, 100_000);
+    let corps: unknown;
+    try {
+      corps = JSON.parse(brut.toString('utf8') || '{}');
+    } catch {
+      return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
+    }
+    if (typeof corps !== 'object' || corps === null || Array.isArray(corps)) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
+    const { decision, commentaire } = corps as { decision?: unknown; commentaire?: unknown };
+    if (decision !== 'approuver' && decision !== 'refuser') return repondreJson(res, 400, { erreur: 'decision attendue : approuver ou refuser' });
+    return repondreJson(res, 200, routes.deciderEscalade(Number(escalade[1]), decision, String(commentaire ?? '')));
   }
   if (req.method === 'POST' && url.pathname === '/api/arret-global') return repondreJson(res, 200, await routes.arretGlobal());
   repondreJson(res, 404, { erreur: 'introuvable' });

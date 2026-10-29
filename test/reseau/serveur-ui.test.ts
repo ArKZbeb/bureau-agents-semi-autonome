@@ -73,3 +73,11 @@ test('décision d’escalade et arrêt global', async () => {
   assert.deepEqual((await m.appeler('/api/arret-global', { methode: 'POST' })).corps, { conteneursArretes: 2 });
   m.fermer();
 });
+
+test('corps JSON invalide ou non-objet : 400', async () => {
+  const m = await monter();
+  assert.equal((await m.appeler('/api/escalades/3', { methode: 'POST', corps: [1, 2] })).statut, 400);
+  assert.equal((await m.appeler('/api/escalades/3', { methode: 'POST', corps: 'texte' })).statut, 400);
+  assert.deepEqual(m.decisions, []);
+  m.fermer();
+});
