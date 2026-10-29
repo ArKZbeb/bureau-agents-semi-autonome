@@ -9,12 +9,16 @@ const JETON = 'jeton-de-session';
 async function monter() {
   const decisions: unknown[] = [];
   let arrets = 0;
+  const actions: unknown[] = [];
   const serveur = creerServeurUi(JETON, {
     taches: () => [{ id: 'T-41' }],
     journal: id => [{ tacheId: id }],
     escalades: () => [{ id: 1 }],
     deciderEscalade: (id, decision, commentaire) => { decisions.push([id, decision, commentaire]); return { ok: true }; },
     arretGlobal: async () => { arrets++; return { conteneursArretes: 2 }; },
+    tache: id => (id === 'T-41' ? { id } : null),
+    creerTache: async t => ({ id: 'T-42', ...t }),
+    action: (id, nom, corps) => { if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi'); actions.push([id, nom, corps]); return { ok: true }; },
   });
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
   const adresse = serveur.address() as net.AddressInfo;
@@ -29,7 +33,7 @@ async function monter() {
       req.on('error', ko);
       req.end(o.corps === undefined ? undefined : JSON.stringify(o.corps));
     });
-  return { adresse, appeler, decisions, arrets: () => arrets, fermer: () => serveur.close() };
+  return { adresse, appeler, decisions, actions, arrets: () => arrets, fermer: () => serveur.close() };
 }
 
 test('écoute uniquement sur 127.0.0.1', async () => {
@@ -80,4 +84,18 @@ test('corps JSON invalide ou non-objet : 400', async () => {
   assert.equal((await m.appeler('/api/escalades/3', { methode: 'POST', corps: 'texte' })).statut, 400);
   assert.deepEqual(m.decisions, []);
   m.fermer();
+});
+
+test('routes du pipeline : lecture, création, actions, erreurs 404 / 400 / 409', async () => {
+  const s = await monter();
+  assert.deepEqual(await s.appeler('/api/taches/T-41'), { statut: 200, corps: { id: 'T-41' } });
+  assert.equal((await s.appeler('/api/taches/T-00')).statut, 404);
+  const cree = await s.appeler('/api/taches', { methode: 'POST', corps: { projet: 'Film', titre: 'Export PDF', cheminProjet: '/p', budgetUsd: 6, demande: 'Exporter en PDF' } });
+  assert.equal(cree.statut, 200);
+  assert.equal((await s.appeler('/api/taches', { methode: 'POST', corps: { titre: 'sans projet' } })).statut, 400);
+  assert.equal((await s.appeler('/api/taches/T-41/reponse', { methode: 'POST', corps: { texte: 'A4' } })).statut, 200);
+  assert.deepEqual(s.actions.at(-1), ['T-41', 'reponse', { texte: 'A4' }]);
+  assert.equal((await s.appeler('/api/taches/T-41/inconnue', { methode: 'POST', corps: {} })).statut, 404);
+  assert.deepEqual(await s.appeler('/api/taches/T-99/reprise', { methode: 'POST', corps: {} }), { statut: 409, corps: { erreur: 'T-99 ne se reprend pas ainsi' } });
+  s.fermer();
 });

@@ -64,9 +64,10 @@ async function monterBanc(T: string, tours: Tour[], avis: (demande: string) => '
     config, racineDepot: RACINE_DEPOT, docker, clientAvis, fetchDependances,
     surOutil: (_t, c) => void c.inspect().then(i => envConteneurs.push(i.Config.Env), () => {}),
   });
+  await o.ordonnanceur.arreter(); // ce test pilote l'étape lui-même : pas d'ordonnanceur en parallèle
   const supprimerVolume = () => docker.getVolume(nomRessource(T)).remove({ force: true }).catch(() => {});
   try {
-    await o.creerTache({ id: T, projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: depotPiege(fichiersEnPlus), budgetUsd });
+    await o.creerTache({ id: T, projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: depotPiege(fichiersEnPlus), budgetUsd, demande: 'Exporter la fiche film en PDF' });
     o.validerArtefact(T, 'plan', PLAN);
   } catch (e) {
     // Sans ce nettoyage, les serveurs restent ouverts : les ports sont pris et la suite ne se termine jamais.

@@ -9,7 +9,22 @@ export type RoutesUi = {
   escalades: () => unknown;
   deciderEscalade: (id: number, decision: 'approuver' | 'refuser', commentaire: string) => unknown;
   arretGlobal: () => Promise<unknown>;
+  tache: (id: string) => unknown;
+  creerTache: (t: { projet: string; titre: string; cheminProjet: string; budgetUsd: number; demande: string }) => Promise<unknown>;
+  action: (id: string, nom: NomAction, corps: Record<string, unknown>) => unknown;
 };
+
+export type NomAction = 'reponse' | 'validation-cadrage' | 'arbitrage' | 'budget' | 'reprise';
+const ACTIONS = new Set<string>(['reponse', 'validation-cadrage', 'arbitrage', 'budget', 'reprise']);
+
+async function lireObjet(req: http.IncomingMessage): Promise<Record<string, unknown> | null> {
+  try {
+    const corps = JSON.parse((await lireCorps(req, 100_000)).toString('utf8') || '{}');
+    return typeof corps === 'object' && corps !== null && !Array.isArray(corps) ? (corps as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
 
 const egal = (a: string, b: string) => timingSafeEqual(Buffer.from(sha256(a), 'hex'), Buffer.from(sha256(b), 'hex'));
 
@@ -36,17 +51,33 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
   if (req.method === 'GET' && url.pathname === '/api/escalades') return repondreJson(res, 200, routes.escalades());
   const escalade = /^\/api\/escalades\/(\d+)$/.exec(url.pathname);
   if (req.method === 'POST' && escalade) {
-    const brut = await lireCorps(req, 100_000);
-    let corps: unknown;
-    try {
-      corps = JSON.parse(brut.toString('utf8') || '{}');
-    } catch {
-      return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
-    }
-    if (typeof corps !== 'object' || corps === null || Array.isArray(corps)) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
+    const corps = await lireObjet(req);
+    if (!corps) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
     const { decision, commentaire } = corps as { decision?: unknown; commentaire?: unknown };
     if (decision !== 'approuver' && decision !== 'refuser') return repondreJson(res, 400, { erreur: 'decision attendue : approuver ou refuser' });
     return repondreJson(res, 200, routes.deciderEscalade(Number(escalade[1]), decision, String(commentaire ?? '')));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/taches') {
+    const c = await lireObjet(req);
+    const ok = c && ['projet', 'titre', 'cheminProjet', 'demande'].every(k => typeof c[k] === 'string' && (c[k] as string).trim() !== '')
+      && typeof c.budgetUsd === 'number' && c.budgetUsd > 0;
+    if (!ok) return repondreJson(res, 400, { erreur: 'attendu : projet, titre, cheminProjet, demande, budgetUsd > 0' });
+    return repondreJson(res, 200, await routes.creerTache(c as Parameters<RoutesUi['creerTache']>[0]));
+  }
+  const fiche = /^\/api\/taches\/(T-\d+)$/.exec(url.pathname);
+  if (req.method === 'GET' && fiche) {
+    const t = routes.tache(fiche[1]);
+    return t ? repondreJson(res, 200, t) : repondreJson(res, 404, { erreur: 'tâche introuvable' });
+  }
+  const action = /^\/api\/taches\/(T-\d+)\/([a-z-]+)$/.exec(url.pathname);
+  if (req.method === 'POST' && action && ACTIONS.has(action[2])) {
+    const c = await lireObjet(req);
+    if (!c) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
+    try {
+      return repondreJson(res, 200, routes.action(action[1], action[2] as NomAction, c));
+    } catch (e) {
+      return repondreJson(res, 409, { erreur: (e as Error).message });
+    }
   }
   if (req.method === 'POST' && url.pathname === '/api/arret-global') return repondreJson(res, 200, await routes.arretGlobal());
   repondreJson(res, 404, { erreur: 'introuvable' });
