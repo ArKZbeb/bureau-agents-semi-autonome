@@ -4,14 +4,19 @@ export type Statut = 'prete' | 'en_cours' | 'en_pause' | 'bloquee' | 'attente_hu
 export type RaisonPause = 'escalade' | 'integrite' | 'budget' | 'erreur_api' | 'arret_global';
 export type EtatTache = { etape: Etape; statut: Statut; raison: string | null; echangesPlan: number; essaisQa: number };
 
+export const RAISON_QUESTIONS = 'le cadreur attend ta réponse';
+export const RAISON_PROPOSITION = 'spec et plan à valider';
+
 export type Evenement =
   | { type: 'demarrage' }
-  | { type: 'etape_terminee'; verdict?: 'ok' | 'objection' | 'go' | 'no_go' }
+  | { type: 'etape_terminee'; verdict?: 'ok' | 'objection' | 'go' | 'no_go' | 'questions' | 'proposition' }
   | { type: 'pause'; raison: RaisonPause; detail: string }
   | { type: 'bloquee'; detail: string }
   | { type: 'reprise' }
   | { type: 'redemarrage' }
   | { type: 'arbitrage'; choix: 'cadreur' | 'alternative' }
+  | { type: 'reponse_cadrage' }
+  | { type: 'validation_cadrage' }
   | { type: 'validation'; decision: 'branche' | 'pr' | 'renvoi' | 'abandon' }
   | { type: 'abandon' };
 
@@ -25,7 +30,7 @@ export class TransitionInvalide extends Error {
   }
 }
 
-const SUIVANTE: Partial<Record<Etape, Etape>> = { cadrage: 'patron_plan', implementation: 'review', review: 'patron_code', patron_code: 'qa' };
+const SUIVANTE: Partial<Record<Etape, Etape>> = { implementation: 'review', review: 'patron_code', patron_code: 'qa' };
 
 export function transition(e: EtatTache, ev: Evenement): EtatTache {
   const refuser = (): never => { throw new TransitionInvalide(e, ev); };
@@ -48,12 +53,23 @@ export function transition(e: EtatTache, ev: Evenement): EtatTache {
     case 'arbitrage':
       if (e.etape !== 'patron_plan' || e.statut !== 'attente_humain') refuser();
       return ev.choix === 'cadreur' ? prete('implementation') : prete('cadrage');
+    case 'reponse_cadrage':
+      if (e.etape !== 'cadrage' || e.statut !== 'attente_humain') refuser();
+      return prete('cadrage');
+    case 'validation_cadrage':
+      if (e.etape !== 'cadrage' || e.statut !== 'attente_humain' || e.raison !== RAISON_PROPOSITION) refuser();
+      return prete('patron_plan');
     case 'validation':
       if (e.etape !== 'validation' || e.statut !== 'attente_humain') refuser();
       if (ev.decision === 'renvoi') return prete('implementation', { essaisQa: 0 });
       return { ...e, statut: ev.decision === 'abandon' ? 'abandonnee' : 'terminee', raison: null };
     case 'etape_terminee': {
       if (e.statut !== 'en_cours') refuser();
+      if (e.etape === 'cadrage') {
+        if (ev.verdict === 'questions') return { ...e, statut: 'attente_humain', raison: RAISON_QUESTIONS };
+        if (ev.verdict === 'proposition') return { ...e, statut: 'attente_humain', raison: RAISON_PROPOSITION };
+        return refuser();
+      }
       const suivante = SUIVANTE[e.etape];
       if (suivante) return prete(suivante);
       if (e.etape === 'patron_plan') {
