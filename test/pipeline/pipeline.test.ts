@@ -361,6 +361,21 @@ test('review en reprise : analyse non relancée, analyse signée conservée', as
   assert.ok(appels[0].prompt.includes('"analyse"'));
 });
 
+test('analyse signée altérée entre la review et le QA : pause d’intégrité, aucun go', async () => {
+  const { db, deps, appels } = banc([{ rapport: 'RAS' }, { note: 'Bien.' }, qaGo]);
+  aEtape(db, 'review');
+  await avancer(deps, 'T-41');
+  await avancer(deps, 'T-41');
+  assert.equal(lireTache(db, 'T-41').etape, 'qa');
+  const falsifiee = JSON.stringify({ ...ANALYSE_VERTE, outils: { ...ANALYSE_VERTE.outils, semgrep: 'ok' }, constats: [] });
+  db.prepare("UPDATE artefacts SET contenu = ? WHERE type = 'analyse'").run(falsifiee);
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.etape, t.statut], ['qa', 'en_pause']);
+  assert.equal(t.raison?.split(' : ')[0], 'integrite');
+  assert.deepEqual(appels.map(a => a.agent.nom), ['reviewer', 'patron'], 'QA jamais lancé');
+  assert.equal(lireArtefact(db, cle, 'T-41', 'verdict'), undefined, 'aucun verdict, donc aucun go');
+});
+
 test('QA : analyse signée illisible ou de forme inattendue = pause d’intégrité', async () => {
   for (const contenu of ['pas du json', '{"sha":"x"}', 'null']) {
     const { db, deps, appels } = banc([qaGo]);

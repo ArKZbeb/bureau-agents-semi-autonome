@@ -45,3 +45,33 @@ test('critères et verdict du QA', () => {
 test('couverture non mesurable ou non applicable : pas de règle de seuil', () => {
   assert.equal(reglesQa(analyse({ couverture: { couvertes: 0, total: 0, pourcentage: null } }), seuils, qaGo, ['c']).verdict, 'go');
 });
+
+test('faille critique : message et fichier', () => {
+  const a = analyse({ constats: [{ outil: 'gitleaks', severite: 'critique', message: 'secret détecté (generic-api-key)', fichier: 'src/a.cs:3' }] });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'no_go', declenchees: ['faille critique : secret détecté (generic-api-key) (src/a.cs:3)'] });
+});
+
+test('ng test en échec : no-go', () => {
+  const a = analyse({ outils: { ...analyse().outils, tests_angular: 'echec' } });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'no_go', declenchees: ['tests en échec (ng test)'] });
+});
+
+test('dotnet test en échec sans TRX lisible (tests null) : no-go sans compte', () => {
+  const a = analyse({ outils: { ...analyse().outils, tests_dotnet: 'echec' }, tests: null });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'no_go', declenchees: ['tests en échec'] });
+});
+
+test('couverture absente : outil non exécuté', () => {
+  const a = analyse({ outils: { ...analyse().outils, couverture: 'absent' }, couverture: null });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'no_go', declenchees: ['outil non exécuté : couverture des lignes modifiées'] });
+});
+
+test('0 % mesuré : no-go (zéro reste une mesure)', () => {
+  const a = analyse({ couverture: { couvertes: 0, total: 10, pourcentage: 0 } });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'no_go', declenchees: ['couverture des lignes modifiées 0 % < 80 %'] });
+});
+
+test('pourcentage égal au seuil : go', () => {
+  const a = analyse({ couverture: { couvertes: 8, total: 10, pourcentage: 80 } });
+  assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'go', declenchees: [] });
+});
