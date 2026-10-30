@@ -11,7 +11,7 @@ import { RelierProjet } from './relier-projet';
   template: `
     <section class="ecran">
       <h1>Hall d'entrée · Tableau des tâches</h1>
-      @if (!etat.projets().length) {
+      @if (!etat.projets().length && !etat.taches().length) {
         <div class="vide">
           <h2>Le bureau est vide</h2>
           <p>Aucun projet relié, aucun agent au travail. Relie un premier dossier local (.NET ou Angular) : le bureau détecte la stack, propose les seuils par défaut, et le cadreur pourra prendre ta première user story.</p>
@@ -21,7 +21,7 @@ import { RelierProjet } from './relier-projet';
         <div class="projets">
           @for (p of etat.projets(); track p.nom) { <span class="projet">{{ p.nom }} · {{ nombre(p.nom) }}</span> }
           <button (click)="dialogue.set('relier')">+ Relier un projet</button>
-          <button class="principal" (click)="dialogue.set('story')">+ Nouvelle user story</button>
+          @if (etat.projets().length) { <button class="principal" (click)="dialogue.set('story')">+ Nouvelle user story</button> }
         </div>
         <div class="kanban">
           @for (col of colonnes(); track col.etape) {

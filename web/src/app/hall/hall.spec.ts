@@ -65,6 +65,16 @@ describe('Hall', () => {
     expect(el.textContent).not.toContain('+ Nouvelle user story');
   });
 
+  it('sans projet relié mais avec des tâches : le tableau reste affiché, pas de nouvelle user story', async () => {
+    etat.taches.set([tache({ id: 'T-7', titre: 'Tâche d’avant les projets' })]);
+    const el = await rendre();
+    expect(el.textContent).not.toContain('Le bureau est vide');
+    expect(el.querySelectorAll('.colonne').length).toBe(7);
+    expect(el.textContent).toContain('Tâche d’avant les projets');
+    expect(el.textContent).toContain('+ Relier un projet');
+    expect(el.textContent).not.toContain('+ Nouvelle user story');
+  });
+
   it('rend les titres de tâche comme texte, jamais comme HTML', async () => {
     etat.projets.set([projet('Film')]);
     etat.taches.set([tache({ titre: '<img src=x onerror=alert(1)>' })]);

@@ -93,4 +93,25 @@ describe('RelierProjet', () => {
     expect(el.querySelector('.alerte')!.textContent).toContain('projet déjà relié : planning');
     expect(fermer).not.toHaveBeenCalled();
   });
+
+  it('seuil ou budget vide ou hors bornes : « Relier le projet » désactivé, rien n’est envoyé', async () => {
+    api.detecter.mockResolvedValue(complete);
+    const { detecter, bouton, saisir, attendre } = await ouvrir();
+    await detecter('/depots/planning');
+    await attendre();
+    const seuil = 'input[aria-label="Seuil de couverture"]', budget = 'input[aria-label="Budget par tâche"]';
+    expect(bouton('Relier le projet').disabled).toBe(false);
+    for (const [champ, valeur, sain] of [
+      [seuil, '', '80'], [seuil, '101', '80'], [seuil, '-1', '80'], [seuil, '50.5', '80'],
+      [budget, '', '6'], [budget, '0', '6'], [budget, '-2', '6'],
+    ]) {
+      await saisir(champ, valeur);
+      expect(bouton('Relier le projet').disabled, `${champ} = « ${valeur} »`).toBe(true);
+      bouton('Relier le projet').click();
+      await saisir(champ, sain);
+    }
+    expect(api.relier).not.toHaveBeenCalled();
+    await saisir(seuil, '0');
+    expect(bouton('Relier le projet').disabled).toBe(false);
+  });
 });
