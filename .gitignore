@@ -3,3 +3,5 @@ conteneur/certificats/*
 !conteneur/certificats/.gitkeep
 # Règles Semgrep (licence non libre) : téléchargées à la construction de l’image, jamais versionnées.
 conteneur/analyse/semgrep-regles.yml
+web/dist/
+web/.angular/
