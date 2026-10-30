@@ -36,7 +36,13 @@ const SHA_VALIDE = /^[0-9a-f]{40}$/;
 function lireAnalyse(db: Base, cle: Buffer, tacheId: string): Analyse {
   const a = lireArtefact(db, cle, tacheId, 'analyse');
   if (!a) throw new AnomalieIntegrite('analyse', 'document manquant : analyse');
-  return JSON.parse(a.contenu) as Analyse;
+  // Contenu signé mais de forme inattendue : anomalie (pause d'intégrité), pas une erreur générique.
+  let v: unknown;
+  try { v = JSON.parse(a.contenu); } catch { throw new AnomalieIntegrite('analyse', 'analyse illisible : JSON invalide'); }
+  const o = v as Partial<Analyse> | null;
+  if (typeof o !== 'object' || o === null || typeof o.sha !== 'string' || typeof o.outils !== 'object' || o.outils === null)
+    throw new AnomalieIntegrite('analyse', 'analyse illisible : forme inattendue');
+  return o as Analyse;
 }
 
 export const RELAIS: Partial<Record<EtapeAgent, string>> = {
@@ -103,13 +109,17 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
         appliquer(db, tacheId, { type: 'bloquee', detail: 'commit de base inconnu : tâche créée avant l’analyse' });
         return fin();
       }
-      // Mesures prises sur la copie de contrôle fraîche, avant le reviewer.
-      const analyse = await deps.analyser(tacheId, volume!, tache.commitBase);
-      enregistrerArtefact(db, cle, tacheId, 'analyse', JSON.stringify(analyse, null, 2));
-      prompt = promptEtape(db, cle, lireTache(db, tacheId));
+      // Mesures prises sur la copie de contrôle fraîche, avant le reviewer. En reprise, la copie a déjà pu être
+      // modifiée par le reviewer : on garde l'analyse signée d'avant lui (déjà dans le prompt).
+      if (tache.reprise === null) {
+        const analyse = await deps.analyser(tacheId, volume!, tache.commitBase);
+        enregistrerArtefact(db, cle, tacheId, 'analyse', JSON.stringify(analyse, null, 2));
+        prompt = promptEtape(db, cle, lireTache(db, tacheId));
+      }
     }
     if (etape === 'qa') {
       const analyse = lireAnalyse(db, cle, tacheId);
+      // Reprise de QA : la copie est réutilisée, un écart de SHA y est aussi traité en anomalie (fail-closed accepté).
       // Sha d'analyse invalide : les mesures statiques sont déjà forcées absentes, donc no-go par les règles, sans fausse anomalie.
       if (SHA_VALIDE.test(analyse.sha) && (await deps.shaCopie(volume!)) !== analyse.sha)
         throw new AnomalieIntegrite('analyse', 'la branche a changé depuis l’analyse de review');
@@ -176,9 +186,9 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
         // Relecture vérifiée après l'agent : une altération pendant l'étape lève AnomalieIntegrite (pause, via le catch).
         criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
         const seuils = lireSeuils(db, tache.projet, deps.config.seuilCouvertureLignes);
-        const r = reglesQa(lireAnalyse(db, cle, tacheId), seuils, s, criteresQa);
-        enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify({ qa: s, regles: r.declenchees, verdict: r.verdict }, null, 2));
-        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: r.verdict });
+        const regles = reglesQa(lireAnalyse(db, cle, tacheId), seuils, s, criteresQa);
+        enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify({ qa: s, regles: regles.declenchees, verdict: regles.verdict }, null, 2));
+        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: regles.verdict });
         break;
       }
     }

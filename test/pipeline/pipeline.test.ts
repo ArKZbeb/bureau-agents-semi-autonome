@@ -315,6 +315,7 @@ test('QA : SHA de la copie illisible alors que celui de l’analyse est valide =
   assert.equal(appels.length, 0);
 });
 
+// Dépend de analyse.ts, qui force les mesures statiques à « absent » quand le sha est invalide : les règles donnent no-go.
 test('QA : SHA de l’analyse invalide = contrôle ignoré, pas d’anomalie, verdict no-go par les règles', async () => {
   const invalide: Analyse = { ...ANALYSE_VERTE, sha: 'pas-un-sha', outils: { ...ANALYSE_VERTE.outils, semgrep: 'absent', gitleaks: 'absent' } };
   const { db, deps } = banc([qaGo], { sha: null });
@@ -323,4 +324,27 @@ test('QA : SHA de l’analyse invalide = contrôle ignoré, pas d’anomalie, ve
   assert.notEqual(t.statut, 'en_pause');
   assert.equal(JSON.parse(lireArtefact(db, cle, 'T-41', 'verdict')!.contenu).verdict, 'no_go');
   assert.equal(t.etape, 'implementation');
+});
+
+test('review en reprise : analyse non relancée, analyse signée conservée', async () => {
+  const { db, deps, appels, analyses } = banc([{ rapport: 'RAS' }]);
+  aEtape(db, 'review');
+  enregistrerArtefact(db, cle, 'T-41', 'analyse', JSON.stringify({ ...ANALYSE_VERTE, tests: { total: 99, echecs: 0 } }));
+  const avant = lireArtefact(db, cle, 'T-41', 'analyse')!.sha256;
+  definirReprise(db, 'T-41', REPRISE);
+  await avancer(deps, 'T-41');
+  assert.equal(analyses.length, 0, 'volume déjà modifié par le reviewer : pas de nouvelle mesure');
+  assert.equal(lireArtefact(db, cle, 'T-41', 'analyse')!.sha256, avant);
+  assert.ok(appels[0].prompt.includes('"analyse"'));
+});
+
+test('QA : analyse signée illisible ou de forme inattendue = pause d’intégrité', async () => {
+  for (const contenu of ['pas du json', '{"sha":"x"}', 'null']) {
+    const { db, deps, appels } = banc([qaGo]);
+    aEtape(db, 'qa');
+    enregistrerArtefact(db, cle, 'T-41', 'analyse', contenu);
+    const t = await avancer(deps, 'T-41');
+    assert.equal(t.raison?.split(' : ')[0], 'integrite', contenu);
+    assert.equal(appels.length, 0);
+  }
 });
