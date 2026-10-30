@@ -43,15 +43,20 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
       return { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan') };
     case 'implementation': {
       const d: Record<string, string> = { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan') };
-      if (tache.essaisQa > 0) Object.assign(d, { verdict_qa: doc('verdict'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code') });
+      if (tache.essaisQa > 0) Object.assign(d, { verdict_qa: doc('verdict'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code'), analyse: doc('analyse') });
       return d;
     }
-    case 'review':
-      return { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan'), resume: doc('resume') };
+    case 'review': {
+      const d: Record<string, string> = { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan'), resume: doc('resume') };
+      // L'analyse est produite pendant l'étape : absente au contrôle du relais, présente pour le reviewer.
+      const analyse = lireArtefact(db, cle, tache.id, 'analyse');
+      if (analyse) d.analyse = analyse.contenu;
+      return d;
+    }
     case 'patron_code':
-      return { spec: doc('spec'), criteres: doc('criteres'), resume: doc('resume'), rapport_review: doc('rapport') };
+      return { spec: doc('spec'), criteres: doc('criteres'), resume: doc('resume'), rapport_review: doc('rapport'), analyse: doc('analyse') };
     case 'qa':
-      return { spec: doc('spec'), criteres: doc('criteres'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code') };
+      return { spec: doc('spec'), criteres: doc('criteres'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code'), analyse: doc('analyse') };
   }
 }
 

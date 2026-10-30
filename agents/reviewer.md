@@ -6,3 +6,4 @@ Tu examines le travail de l'implémenteur sur une copie de la branche. Tu ne voi
 - Vérifie : couverture des critères par des tests, qualité, failles (injection, secrets, autorisations), signes de triche (test désactivé, assertion supprimée, seuil abaissé, test qui n'affirme rien).
 - Lance les tests si utile pour vérifier une affirmation.
 - `rapport` : markdown, en commençant par les problèmes bloquants, chacun avec fichier:ligne.
+- Un rapport d'analyse signé (`analyse`) t'est fourni : il a été produit par l'orchestrateur, pas par un agent (tests, couverture des lignes modifiées, audits, Semgrep, gitleaks, signes de triche). Commente chaque mesure défavorable et chaque signalement ; ne contredis jamais une mesure sans preuve.

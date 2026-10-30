@@ -7,21 +7,33 @@ import { AnomalieIntegrite } from '../../src/integrite/anomalie.ts';
 import { enregistrerArtefact, lireArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal } from '../../src/integrite/journal.ts';
 import type { Controle, DemandeControle } from '../../src/pipeline/controleur.ts';
-import { avancer, verdictQa, type DepsPipeline } from '../../src/pipeline/pipeline.ts';
+import { avancer, type DepsPipeline } from '../../src/pipeline/pipeline.ts';
 import { numeroterCriteres } from '../../src/pipeline/prompts.ts';
-import { appliquer, creerTache, definirReprise, lireTache } from '../../src/taches/depot.ts';
+import type { Analyse } from '../../src/analyse/analyse.ts';
+import { appliquer, creerTache, definirCommitBase, definirReprise, lireTache } from '../../src/taches/depot.ts';
+import { definirSeuils } from '../../src/taches/seuils.ts';
 import { RAISON_PROPOSITION, RAISON_QUESTIONS } from '../../src/taches/etats.ts';
 import { listerEchanges, lireProposition } from '../../src/taches/echanges.ts';
 
 const cle = Buffer.alloc(32, 11);
 const PLAN = '# Plan\n\n## Zones touchées\n\n- `src/**`\n';
 
+const SHA = 'a'.repeat(40);
+const BASE = 'b'.repeat(40);
+const ANALYSE_VERTE: Analyse = {
+  sha: SHA, base: BASE,
+  outils: { tests_dotnet: 'ok', audit_dotnet: 'ok', tests_angular: 'non_applicable', audit_npm: 'non_applicable', semgrep: 'ok', gitleaks: 'ok', couverture: 'ok' },
+  tests: { total: 12, echecs: 0 }, couverture: { couvertes: 9, total: 10, pourcentage: 90 }, constats: [], signalements: [],
+};
+
 const SPEC = "# Spec\n\n## Critères d’acceptation\n\n1. Le PDF contient le synopsis\n";
 
-function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: ResultatEtape; fichiers?: Record<string, string> } = {}) {
+function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: ResultatEtape; fichiers?: Record<string, string>; analyse?: Analyse; sha?: string | null; base?: string | null } = {}) {
   const db = ouvrirBase(':memory:');
   creerTache(db, { id: 'T-41', projet: 'Film', titre: 'Export PDF', cheminProjet: '/p', budgetUsd: 6 });
+  if (o.base !== null) definirCommitBase(db, 'T-41', o.base ?? BASE);
   enregistrerArtefact(db, cle, 'T-41', 'demande', 'Exporter la fiche film en PDF');
+  const analyses: [string, string, string][] = [];
   const appels: { agent: Agent; prompt: string; volume?: string }[] = [];
   const controles: DemandeControle[] = [];
   const copies: string[] = [];
@@ -38,9 +50,11 @@ function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: R
     copie: async (id, neuve) => { copies.push(`${neuve ? 'neuve' : 'reprise'}:${id}`); return 'bureau-t-41-controle'; },
     supprimerCopie: async id => { copies.push(`supprimee:${id}`); lectures.push('copie supprimée'); },
     controler: async d => { controles.push(d); return { verdict: o.controle ?? 'ok', constats: o.controle === 'signaler' ? ['critère 1 retiré'] : [], coutUsd: 0.001 }; },
+    analyser: async (id, volume, base) => { analyses.push([id, volume, base]); return o.analyse ?? ANALYSE_VERTE; },
+    shaCopie: async () => (o.sha === undefined ? SHA : o.sha),
     lireFichier: async (volume, chemin) => { lectures.push(`${volume}:${chemin}`); return o.fichiers?.[chemin] ?? null; },
   };
-  return { db, deps, appels, controles, copies, lectures };
+  return { db, deps, appels, controles, copies, lectures, analyses };
 }
 
 function valider(db: ReturnType<typeof ouvrirBase>) {
@@ -106,13 +120,6 @@ test('parcours du patron (plan) au QA : copie pour les agents en lecture seule, 
   assert.equal(lireArtefact(db, cle, 'T-41', 'resume')?.contenu, 'Export PDF ajouté, 12 tests verts.');
   assert.equal(lireArtefact(db, cle, 'T-41', 'avis_patron')?.contenu, 'Plan sûr.');
   assert.ok(t.depenseUsd > 0, 'coût du contrôleur compté');
-});
-
-test('QA : critère absent ou non rempli = no-go, retour à l’implémentation', async () => {
-  assert.equal(verdictQa({ verdict: 'go', criteres: [] }, ['A']), 'no_go');
-  assert.equal(verdictQa({ verdict: 'go', criteres: [{ numero: 1, rempli: false, preuve: '' }] }, ['A']), 'no_go');
-  assert.equal(verdictQa({ verdict: 'no_go', criteres: [{ numero: 1, rempli: true, preuve: 'x' }] }, ['A']), 'no_go');
-  assert.equal(verdictQa({ verdict: 'go', criteres: [{ numero: 1, rempli: true, preuve: 'x' }] }, ['A']), 'go');
 });
 
 test('contrôleur : signalement = pause d’intégrité, sans lancer l’agent', async () => {
@@ -190,10 +197,6 @@ test('QA : critères signés altérés pendant l’étape = pause d’intégrit�
   assert.deepEqual([t.statut, t.agent], ['en_pause', null]);
 });
 
-test('verdictQa : aucun critère signé = no-go (fail-closed)', () => {
-  assert.equal(verdictQa({ verdict: 'go', criteres: [] }, []), 'no_go');
-});
-
 test('étape bloquée par l’exécution : copie supprimée, agent libéré', async () => {
   const { db, deps, copies } = banc([]);
   valider(db);
@@ -249,4 +252,75 @@ test('pause d’intégrité pendant l’étape : la reprise de session est effac
   };
   const t = await avancer(deps, 'T-41');
   assert.deepEqual([t.statut, t.raison, t.reprise], ['en_pause', 'integrite : plan altéré pendant l’étape', null]);
+});
+
+function aEtape(db: ReturnType<typeof ouvrirBase>, etape: 'review' | 'qa', analyse: Analyse = ANALYSE_VERTE) {
+  valider(db);
+  for (const [type, contenu] of [['resume', 'Export PDF ajouté.'], ['rapport', 'RAS'], ['avis_patron_code', 'Bien.']] as const)
+    enregistrerArtefact(db, cle, 'T-41', type, contenu);
+  if (etape === 'qa') enregistrerArtefact(db, cle, 'T-41', 'analyse', JSON.stringify(analyse));
+  db.prepare("UPDATE taches SET etape = ? WHERE id = 'T-41'").run(etape);
+}
+const qaGo = { verdict: 'go', criteres: [{ numero: 1, rempli: true, preuve: 'ExportPdf_ContientSynopsis vert' }] };
+const COUV_BASSE: Analyse = { ...ANALYSE_VERTE, couverture: { couvertes: 18, total: 25, pourcentage: 72 } };
+
+test('review : analyse lancée sur la copie, signée, transmise au reviewer', async () => {
+  const { db, deps, appels, analyses } = banc([{ rapport: 'RAS' }]);
+  aEtape(db, 'review');
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.etape, 'patron_code');
+  assert.deepEqual(analyses, [['T-41', 'bureau-t-41-controle', BASE]]);
+  assert.equal(JSON.parse(lireArtefact(db, cle, 'T-41', 'analyse')!.contenu).sha, SHA);
+  assert.ok(appels[0].prompt.includes('"analyse"'), 'analyse dans les documents du reviewer');
+});
+
+test('review sans commit de base : étape bloquée, aucun agent', async () => {
+  const { db, deps, appels } = banc([], { base: null });
+  aEtape(db, 'review');
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.statut, t.raison], ['bloquee', 'commit de base inconnu : tâche créée avant l’analyse']);
+  assert.equal(appels.length, 0);
+});
+
+test('QA : couverture sous le seuil du projet = no-go avec la règle déclenchée', async () => {
+  const { db, deps } = banc([qaGo]);
+  aEtape(db, 'qa', COUV_BASSE);
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.etape, t.essaisQa], ['implementation', 1]);
+  assert.deepEqual(JSON.parse(lireArtefact(db, cle, 'T-41', 'verdict')!.contenu).regles, ['couverture des lignes modifiées 72 % < 80 %']);
+});
+
+test('QA : seuil propre au projet appliqué', async () => {
+  const { db, deps } = banc([qaGo]);
+  definirSeuils(db, 'Film', { couvertureLignes: 70 });
+  aEtape(db, 'qa', COUV_BASSE);
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.etape, t.statut], ['validation', 'attente_humain']);
+  assert.deepEqual(JSON.parse(lireArtefact(db, cle, 'T-41', 'verdict')!.contenu).regles, []);
+});
+
+test('QA : branche modifiée depuis l’analyse = pause d’intégrité, sans agent', async () => {
+  const { db, deps, appels } = banc([qaGo], { sha: 'c'.repeat(40) });
+  aEtape(db, 'qa');
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.raison?.split(' : ')[0], 'integrite');
+  assert.equal(appels.length, 0);
+});
+
+test('QA : SHA de la copie illisible alors que celui de l’analyse est valide = pause d’intégrité', async () => {
+  const { db, deps, appels } = banc([qaGo], { sha: null });
+  aEtape(db, 'qa');
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.raison?.split(' : ')[0], 'integrite');
+  assert.equal(appels.length, 0);
+});
+
+test('QA : SHA de l’analyse invalide = contrôle ignoré, pas d’anomalie, verdict no-go par les règles', async () => {
+  const invalide: Analyse = { ...ANALYSE_VERTE, sha: 'pas-un-sha', outils: { ...ANALYSE_VERTE.outils, semgrep: 'absent', gitleaks: 'absent' } };
+  const { db, deps } = banc([qaGo], { sha: null });
+  aEtape(db, 'qa', invalide);
+  const t = await avancer(deps, 'T-41');
+  assert.notEqual(t.statut, 'en_pause');
+  assert.equal(JSON.parse(lireArtefact(db, cle, 'T-41', 'verdict')!.contenu).verdict, 'no_go');
+  assert.equal(t.etape, 'implementation');
 });

@@ -12,6 +12,9 @@ import { ajouterDepense, appliquer, definirAgent, definirReprise, lireTache, typ
 import { ajouterEchange, enregistrerProposition } from '../taches/echanges.ts';
 import type { Controle, DemandeControle } from './controleur.ts';
 import { documentsEtape, extraireCriteres, lireCriteres, promptEtape } from './prompts.ts';
+import type { Analyse } from '../analyse/analyse.ts';
+import { reglesQa } from '../analyse/regles.ts';
+import { lireSeuils } from '../taches/seuils.ts';
 import type { z } from 'zod';
 
 export type DepsPipeline = {
@@ -22,7 +25,19 @@ export type DepsPipeline = {
   controler: (d: DemandeControle) => Promise<Controle>;
   /** Lecture d'un fichier dans un volume (la copie de contrôle du cadreur), avant sa suppression. */
   lireFichier: (volume: string, chemin: string) => Promise<string | null>;
+  /** Mesures de l'orchestrateur sur la copie de contrôle (tests, couverture, audits, Semgrep, gitleaks). */
+  analyser: (tacheId: string, volume: string, base: string) => Promise<Analyse>;
+  /** SHA du commit de la branche dans la copie ; null si illisible. */
+  shaCopie: (volume: string) => Promise<string | null>;
 };
+
+const SHA_VALIDE = /^[0-9a-f]{40}$/;
+
+function lireAnalyse(db: Base, cle: Buffer, tacheId: string): Analyse {
+  const a = lireArtefact(db, cle, tacheId, 'analyse');
+  if (!a) throw new AnomalieIntegrite('analyse', 'document manquant : analyse');
+  return JSON.parse(a.contenu) as Analyse;
+}
 
 export const RELAIS: Partial<Record<EtapeAgent, string>> = {
   patron_plan: 'Cadrage → Patron (plan)',
@@ -31,12 +46,6 @@ export const RELAIS: Partial<Record<EtapeAgent, string>> = {
   patron_code: 'Review → Patron (code)',
   qa: 'Patron (code) → QA',
 };
-
-export function verdictQa(sortie: z.infer<typeof SortieQa>, criteres: string[]): 'go' | 'no_go' {
-  if (sortie.verdict !== 'go' || criteres.length === 0) return 'no_go';
-  const remplis = new Set(sortie.criteres.filter(c => c.rempli).map(c => c.numero));
-  return criteres.every((_, i) => remplis.has(i + 1)) ? 'go' : 'no_go';
-}
 
 function signaler(deps: DepsPipeline, tacheId: string, raison: 'integrite' | 'erreur_api', detail: string): Tache {
   // Après une anomalie, aucune session n'est reprise telle quelle : la reprise humaine relance l'étape à neuf.
@@ -87,6 +96,24 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
   };
   try {
     volume = def.espace === 'copie' ? await deps.copie(tacheId, tache.reprise === null) : undefined;
+    if (etape === 'review') {
+      if (!tache.commitBase) {
+        // Tâche encore prête : la machine à états n'accepte « bloquee » que depuis en_cours.
+        appliquer(db, tacheId, { type: 'demarrage' });
+        appliquer(db, tacheId, { type: 'bloquee', detail: 'commit de base inconnu : tâche créée avant l’analyse' });
+        return fin();
+      }
+      // Mesures prises sur la copie de contrôle fraîche, avant le reviewer.
+      const analyse = await deps.analyser(tacheId, volume!, tache.commitBase);
+      enregistrerArtefact(db, cle, tacheId, 'analyse', JSON.stringify(analyse, null, 2));
+      prompt = promptEtape(db, cle, lireTache(db, tacheId));
+    }
+    if (etape === 'qa') {
+      const analyse = lireAnalyse(db, cle, tacheId);
+      // Sha d'analyse invalide : les mesures statiques sont déjà forcées absentes, donc no-go par les règles, sans fausse anomalie.
+      if (SHA_VALIDE.test(analyse.sha) && (await deps.shaCopie(volume!)) !== analyse.sha)
+        throw new AnomalieIntegrite('analyse', 'la branche a changé depuis l’analyse de review');
+    }
     const r = await deps.executer(tacheId, agentPour(etape, deps.config, deps.racineDepot), prompt, { volume });
     if (r.issue !== 'terminee') return fin();
 
@@ -148,8 +175,10 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
         if (!s) { t = illisible(); break; }
         // Relecture vérifiée après l'agent : une altération pendant l'étape lève AnomalieIntegrite (pause, via le catch).
         criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
-        enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify(s, null, 2));
-        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: verdictQa(s, criteresQa) });
+        const seuils = lireSeuils(db, tache.projet, deps.config.seuilCouvertureLignes);
+        const r = reglesQa(lireAnalyse(db, cle, tacheId), seuils, s, criteresQa);
+        enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify({ qa: s, regles: r.declenchees, verdict: r.verdict }, null, 2));
+        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: r.verdict });
         break;
       }
     }

@@ -4,3 +4,4 @@ Tu donnes un avis critique, non bloquant, sur le code produit, sur une copie de 
 
 - Ce qui tiendra mal dans le temps, ce qui est plus compliqué que nécessaire, ce qui manque au rapport du reviewer.
 - `note` : markdown, court, en commençant par ta conclusion.
+- Le rapport d'analyse signé (`analyse`) complète le rapport du reviewer : signale ce que ni l'un ni l'autre ne couvre.

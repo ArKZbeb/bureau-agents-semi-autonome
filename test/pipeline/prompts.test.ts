@@ -9,13 +9,13 @@ import { documentsEtape, extraireCriteres, lireCriteres, numeroterCriteres, prom
 
 const cle = Buffer.alloc(32, 9);
 
-function tache(etape: string, essaisQa = 0, echangesPlan = 0) {
+function tache(etape: string, essaisQa = 0, echangesPlan = 0, sansAnalyse = false) {
   const db = ouvrirBase(':memory:');
   creerTache(db, { id: 'T-41', projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: '/p', budgetUsd: 6 });
   db.prepare('UPDATE taches SET etape = ?, essais_qa = ?, echanges_plan = ? WHERE id = ?').run(etape, essaisQa, echangesPlan, 'T-41');
   for (const [type, contenu] of [['demande', 'Exporter la fiche en PDF'], ['spec', '# Spec'], ['criteres', numeroterCriteres(['Le PDF contient le synopsis'])],
-    ['plan', '# Plan'], ['resume', 'fait'], ['rapport', 'RAS'], ['avis_patron_code', 'ok'], ['verdict', '{"verdict":"no_go"}'], ['avis_patron', 'objection']] as const)
-    enregistrerArtefact(db, cle, 'T-41', type, contenu);
+    ['plan', '# Plan'], ['resume', 'fait'], ['rapport', 'RAS'], ['avis_patron_code', 'ok'], ['verdict', '{"verdict":"no_go"}'], ['avis_patron', 'objection'], ['analyse', '{"sha":"x"}']] as const)
+    if (!(sansAnalyse && type === 'analyse')) enregistrerArtefact(db, cle, 'T-41', type, contenu);
   return { db, t: lireTache(db, 'T-41') };
 }
 
@@ -34,9 +34,11 @@ test('critères numérotés et relus', () => {
 test('documents par étape', () => {
   assert.deepEqual(Object.keys(documentsEtape(tache('patron_plan').db, cle, tache('patron_plan').t)), ['spec', 'criteres', 'plan']);
   const { db, t } = tache('implementation', 1);
-  assert.deepEqual(Object.keys(documentsEtape(db, cle, t)), ['spec', 'criteres', 'plan', 'verdict_qa', 'rapport_review', 'avis_patron_code']);
+  assert.deepEqual(Object.keys(documentsEtape(db, cle, t)), ['spec', 'criteres', 'plan', 'verdict_qa', 'rapport_review', 'avis_patron_code', 'analyse']);
   const qa = tache('qa');
-  assert.deepEqual(Object.keys(documentsEtape(qa.db, cle, qa.t)), ['spec', 'criteres', 'rapport_review', 'avis_patron_code']);
+  assert.deepEqual(Object.keys(documentsEtape(qa.db, cle, qa.t)), ['spec', 'criteres', 'rapport_review', 'avis_patron_code', 'analyse']);
+  const pc = tache('patron_code');
+  assert.ok('analyse' in documentsEtape(pc.db, cle, pc.t));
 });
 
 test('cadrage : demande, échanges, avis du patron après objection', () => {
@@ -70,4 +72,13 @@ test('document signé manquant : anomalie d’intégrité, jamais une erreur tra
   // Le résumé de l'implémenteur n'a jamais été signé.
   assert.throws(() => documentsEtape(db, cle, lireTache(db, 'T-42')),
     (e: unknown) => e instanceof AnomalieIntegrite && e.artefact === 'resume' && e.message === 'document manquant : resume');
+});
+
+test('analyse : obligatoire à l’étape qa, facultative à l’étape review', () => {
+  const qa = tache('qa', 0, 0, true);
+  assert.throws(() => documentsEtape(qa.db, cle, qa.t), (e: unknown) => e instanceof AnomalieIntegrite);
+  const rv = tache('review');
+  assert.ok('analyse' in documentsEtape(rv.db, cle, rv.t));
+  const avant = tache('review', 0, 0, true);
+  assert.ok(!('analyse' in documentsEtape(avant.db, cle, avant.t)), 'absente avant l’analyse, sans anomalie');
 });
