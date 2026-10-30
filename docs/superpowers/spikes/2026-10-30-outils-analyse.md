@@ -93,11 +93,24 @@ environ 1 min sur ce poste, téléchargements en cache exclus.
 
 ## 3. Règles Semgrep hors ligne
 
-`conteneur/analyse/semgrep-regles.yml` contient `https://semgrep.dev/c/p/csharp` (27 règles,
-SHA-256 `f834ed6c…e69d`) suivi de `https://semgrep.dev/c/p/typescript` (74 règles, JavaScript et TypeScript,
-SHA-256 `967e551f…5395`). Les deux ont été récupérés le 2026-10-30 et concaténés sans modification, sous une
-seule clé `rules:` et derrière un en-tête de provenance. Total : 101 règles. SHA-256 du fichier commité :
-`ffb5f215e6db713be51d55b6e0ccaae457859d89e7aab96914ac811dd897ece5`.
+Les règles ne sont **pas versionnées**, car leur licence n'est pas libre (voir § 7 et E19). Elles sont récupérées
+à chaque construction de l'image (`npm run image`) depuis deux jeux du registre :
+- `https://semgrep.dev/c/p/csharp` : 27 règles le 2026-10-30 ;
+- `https://semgrep.dev/c/p/typescript` : 74 règles le 2026-10-30, pour JavaScript et TypeScript.
+
+Elles sont concaténées sans modification sous une seule clé `rules:` dans `/opt/analyse/semgrep-regles.yml`, en
+lecture seule. Le fichier n'est pas figé par un SHA-256, puisque le registre le modifie sans changer de version.
+C'est le digest de l'image, inscrit au manifeste signé, qui fige les règles réellement utilisées. La construction
+affiche le nombre de règles et le SHA-256 de chaque jeu, pour la traçabilité.
+
+Le jour du spike, les empreintes valaient `f834ed6c…e69d` pour p/csharp et `967e551f…5395` pour p/typescript,
+pour 101 règles au total. Ces valeurs ne servent que d'indication et ne sont pas vérifiées à la construction.
+
+Si le téléchargement échoue, **la construction de l'image échoue** : `curl -f`, `set -e`. Elle échoue aussi dans
+trois autres cas, ce qui évite toute image construite avec un fichier de règles vide ou altéré :
+- la réponse ne commence pas par `rules:` (page d'erreur ou de connexion, par exemple) ;
+- la réponse ne contient aucune règle ;
+- le fichier réuni n'est pas accepté par un scan Semgrep hors ligne d'un fichier C# vide.
 
 `p/default` a été écarté : 2,5 Mo et 1 073 règles, presque toutes pour d'autres langages.
 
@@ -327,13 +340,31 @@ Quand un projet n'a aucune vulnérabilité, **`frameworks` est absent**. Quand i
   `-f net8.0` : sans incidence pour l'analyse, qui ne crée pas de projet. Un projet net8.0 se construit et se
   teste avec le SDK 9 et le runtime 8.0.33. La restauration affiche l'avertissement NuGet Audit `NU1903` pour un
   paquet vulnérable ; un projet en `TreatWarningsAsErrors` échouerait donc à la compilation.
+- **E19 (Tasks 1 et 2, règles Semgrep récupérées à la construction).** Le plan prévoyait un fichier
+  `conteneur/analyse/semgrep-regles.yml` produit par la Task 1, versionné et copié dans l'image. L'utilisateur a
+  décidé de ne pas le versionner : la licence des règles n'est pas libre et le dépôt est public. Ce qui change :
+  - le fichier est ignoré par git (`.gitignore`) ;
+  - le Dockerfile télécharge p/csharp et p/typescript à la construction, les valide (§ 3) et les écrit dans
+    `/opt/analyse/semgrep-regles.yml` ;
+  - le `COPY` nomme les fichiers d'`analyse/` un à un, pour qu'une copie locale non versionnée n'entre jamais dans
+    l'image.
+  Conséquences :
+  - les règles ne sont plus figées par un SHA-256, mais seulement par le digest de l'image ;
+  - deux constructions successives peuvent embarquer des règles différentes ;
+  - la construction exige l'accès à semgrep.dev et échoue sans lui.
+- **E20 (Task 2, gitleaks lit le `.gitleaksignore` du dossier courant).** En plus de celui du dossier analysé,
+  gitleaks charge le `.gitleaksignore` du **répertoire courant** (constaté en Task 2). Lancé depuis
+  `/workspace/projet`, il lirait donc le fichier du dépôt même en analysant un clone `--no-checkout` (E9).
+  `analyser.sh` lance désormais gitleaks depuis `$HOME` (`/workspace/.analyse-home`, qui ne contient pas de
+  `.gitleaksignore`) : `( cd "$HOME" && gitleaks git "$CLONE" … )`. Dans le test E9 du spike, gitleaks avait été
+  lancé depuis `/tmp`, ce qui explique que l'effet n'avait pas été vu.
 
 ## 7. Points ouverts
 
 - **Licence des règles Semgrep.** Les règles du registre portent `license: Semgrep Rules License v1.0`
-  (semgrep.dev/legal/rules-license), qui n'est pas une licence libre. Le dépôt GitHub du projet est **public** :
-  commiter `conteneur/analyse/semgrep-regles.yml` revient à les redistribuer. À valider par l'utilisateur avant
-  tout push. Alternative : récupérer les règles au moment de `npm run image`, avec SHA-256, sans les commiter.
+  (semgrep.dev/legal/rules-license), qui n'est pas une licence libre, et le dépôt GitHub du projet est
+  **public**. **Décision de l'utilisateur :** les règles ne sont pas versionnées. Elles sont récupérées à chaque
+  construction de l'image, puis figées par son digest (§ 3, E19). Il n'y a donc aucune redistribution dans le dépôt.
 - **Taille de l'image** (2,53 Go contre 620 Mo). Le plan ajoute les outils à l'image des agents ; tous les
   conteneurs d'agents en héritent. Une image d'analyse séparée serait plus légère pour les agents, mais
   modifierait le plan.
