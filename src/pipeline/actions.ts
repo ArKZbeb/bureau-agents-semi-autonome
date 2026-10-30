@@ -41,7 +41,7 @@ export function arbitrer(db: Base, cle: Buffer, tacheId: string, choix: 'cadreur
 }
 
 export function continuerBudget(db: Base, cle: Buffer, tacheId: string, montantUsd: number): Tache {
-  if (!(montantUsd > 0)) throw new Error('montant attendu : nombre positif');
+  if (!Number.isFinite(montantUsd) || !(montantUsd > 0)) throw new Error('montant attendu : nombre positif');
   const t = lireTache(db, tacheId);
   if (t.statut !== 'en_pause' || raisonPause(t) !== 'budget') throw new Error(`${tacheId} n’est pas en pause budget`);
   augmenterBudget(db, tacheId, montantUsd);

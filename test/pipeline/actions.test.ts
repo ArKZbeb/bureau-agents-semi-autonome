@@ -101,3 +101,11 @@ test('reprise globale : décision « Moi » journalisée, tâches toujours en pa
   assert.equal(lireTache(db, 'T-43').statut, 'en_pause');
   verifierJournal(db, cle);
 });
+
+test('budget : montant non fini refusé', () => {
+  const db = tache();
+  appliquer(db, 'T-43', { type: 'pause', raison: 'budget', detail: 'x' });
+  assert.throws(() => continuerBudget(db, cle, 'T-43', Infinity), /montant attendu/);
+  assert.throws(() => continuerBudget(db, cle, 'T-43', NaN), /montant attendu/);
+  assert.equal(lireTache(db, 'T-43').budgetUsd, 6);
+});

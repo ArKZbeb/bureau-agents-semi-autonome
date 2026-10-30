@@ -25,7 +25,7 @@ async function monter() {
   });
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
   const adresse = serveur.address() as net.AddressInfo;
-  const appeler = (chemin: string, o: { methode?: string; entetes?: Record<string, string>; corps?: unknown } = {}) =>
+  const appeler = (chemin: string, o: { methode?: string; entetes?: Record<string, string>; corps?: unknown; brut?: string } = {}) =>
     new Promise<{ statut: number; corps: unknown }>((ok, ko) => {
       const req = http.request({ host: '127.0.0.1', port: adresse.port, path: chemin, method: o.methode ?? 'GET',
         headers: { host: `127.0.0.1:${adresse.port}`, authorization: `Bearer ${JETON}`, ...o.entetes } }, res => {
@@ -34,7 +34,7 @@ async function monter() {
         res.on('end', () => ok({ statut: res.statusCode ?? 0, corps: t ? JSON.parse(t) : null }));
       });
       req.on('error', ko);
-      req.end(o.corps === undefined ? undefined : JSON.stringify(o.corps));
+      req.end(o.brut ?? (o.corps === undefined ? undefined : JSON.stringify(o.corps)));
     });
   return { adresse, appeler, decisions, actions, creations, arrets: () => arrets, reprises: () => reprises, fermer: () => serveur.close() };
 }
@@ -129,4 +129,12 @@ test('reprise globale : réactive l’ordonnanceur, derrière les mêmes contrô
   assert.deepEqual(await m.appeler('/api/reprise-globale', { methode: 'POST' }), { statut: 200, corps: { ordonnanceur: 'actif' } });
   assert.equal(m.reprises(), 1);
   m.fermer();
+});
+
+test('POST /api/taches : budget non fini (1e999 = Infinity en JSON) refusé (400)', async () => {
+  const s = await monter();
+  const r = await s.appeler('/api/taches', { methode: 'POST', brut: '{"projet":"Film","titre":"Export","cheminProjet":"/p","demande":"x","budgetUsd":1e999}' });
+  assert.equal(r.statut, 400);
+  assert.equal(s.creations.length, 0);
+  s.fermer();
 });
