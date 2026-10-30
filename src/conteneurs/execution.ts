@@ -73,7 +73,9 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     verifierJournal(deps.db, deps.cle);
     if (tache.reprise) {
       const transcript = await lireFichierVolume(deps.docker, imageId, volume, cheminTranscript(tache.reprise.sessionId));
-      if (sha256(transcript ?? '') !== tache.reprise.empreinteTranscript) throw new AnomalieIntegrite('transcript', 'transcript de session modifié pendant la pause');
+      // Illisible (absent, ou au-delà du plafond de lecture) : rien n'est vérifiable, jamais comparé comme vide.
+      if (transcript === null) throw new AnomalieIntegrite('transcript', 'transcript de session illisible : reprise impossible');
+      if (sha256(transcript) !== tache.reprise.empreinteTranscript) throw new AnomalieIntegrite('transcript', 'transcript de session modifié pendant la pause');
     }
   } catch (e) {
     if (e instanceof AnomalieIntegrite) return pauseIntegrite(deps, tacheId, e.message);
