@@ -38,3 +38,9 @@ test('BUREAU_TACHES_SIMULTANEES : entier ≥ 1, sinon 2', () => {
   for (const v of ['0', '-1', '1.5', 'abc', '', 'Infinity', 'NaN', ' '])
     assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: v }).tachesSimultanees, 2, `valeur « ${v} »`);
 });
+
+test('seuil de couverture par défaut 80, surcharge bornée', () => {
+  assert.equal(chargerConfig({}).seuilCouvertureLignes, 80);
+  assert.equal(chargerConfig({ BUREAU_SEUIL_COUVERTURE: '90' }).seuilCouvertureLignes, 90);
+  for (const v of ['-1', '101', 'abc', '']) assert.equal(chargerConfig({ BUREAU_SEUIL_COUVERTURE: v }).seuilCouvertureLignes, 80);
+});

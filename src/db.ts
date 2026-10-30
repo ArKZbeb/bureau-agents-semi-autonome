@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS echanges (
 CREATE TABLE IF NOT EXISTS propositions (
   tache_id TEXT PRIMARY KEY, contenu TEXT NOT NULL, cree_le TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS seuils_projets (
+  projet TEXT PRIMARY KEY, couverture_lignes INTEGER NOT NULL CHECK (couverture_lignes BETWEEN 0 AND 100)
+);
 CREATE TABLE IF NOT EXISTS journal (
   id INTEGER PRIMARY KEY, tache_id TEXT NOT NULL, horodatage TEXT NOT NULL, type TEXT NOT NULL,
   outil TEXT, commande TEXT NOT NULL, couche TEXT NOT NULL, decision TEXT NOT NULL,

@@ -24,6 +24,8 @@ export type Config = {
   conteneur: { memoire: number; cpus: number; pids: number };
   modeles: Record<NomModele, string>;
   tachesSimultanees: number;
+  seuilCouvertureLignes: number;
+  delaiAnalyseMs: number;
 };
 
 // $ par million de tokens
@@ -32,6 +34,12 @@ export const TARIFS: Tarifs = {
   'claude-sonnet-5-5': { entree: 2, sortie: 10 },
   'claude-haiku-5-5': { entree: 0.1, sortie: 0.5 },
 };
+
+// Entier entre min et max écrit en chiffres ; toute autre valeur donne la valeur par défaut.
+function entierEntre(valeur: string | undefined, min: number, max: number, defaut: number): number {
+  const n = Number(valeur);
+  return valeur !== undefined && /^\d+$/.test(valeur) && Number.isSafeInteger(n) && n >= min && n <= max ? n : defaut;
+}
 
 // Entier ≥ 1 écrit en chiffres ; toute autre valeur (0, négatif, décimal, texte) donne la valeur par défaut.
 function entierPositif(valeur: string | undefined, defaut: number): number {
@@ -55,5 +63,7 @@ export function chargerConfig(env: NodeJS.ProcessEnv = process.env): Config {
     conteneur: { memoire: 4 * 1024 ** 3, cpus: 2, pids: 512 },
     modeles: Object.fromEntries(Object.entries(MODELES).map(([nom, defaut]) => [nom, env[`BUREAU_MODELE_${nom.toUpperCase()}`] ?? defaut])) as Record<NomModele, string>,
     tachesSimultanees: entierPositif(env.BUREAU_TACHES_SIMULTANEES, 2),
+    seuilCouvertureLignes: entierEntre(env.BUREAU_SEUIL_COUVERTURE, 0, 100, 80),
+    delaiAnalyseMs: 45 * 60_000,
   };
 }
