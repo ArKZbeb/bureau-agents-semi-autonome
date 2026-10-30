@@ -151,30 +151,37 @@ export const PLAFOND_LECTURE = 5 * 1024 ** 2;
 /** Plafond des fichiers d'analyse (diff.patch, Cobertura, rapports) : un fichier tronqué fausserait les mesures. */
 export const PLAFOND_ANALYSE = 64 * 1024 ** 2;
 
+/** Fichier au-delà du plafond, pour le gardien : jamais un extrait, que le gardien jugerait comme s'il était complet. */
+export type TropGros = { readonly tropGros: true };
+export const TROP_GROS: TropGros = Object.freeze({ tropGros: true });
+/** Contenu, null (illisible, absent, hors de /workspace) ou « trop gros ». */
+export type LectureControlee = string | null | TropGros;
+
 // Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, lit au plus plafond + 1 octets.
 const commandeLecture = (chemin: string, plafond: number) => [
   'sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c "$2" -- "$p"',
   'lecture', chemin, String(plafond + 1),
 ];
-/**
- * Au-delà du plafond : « null » (par défaut), le fichier n'est pas lu, jamais un contenu tronqué présenté comme complet ;
- * « tronquer » (gardien seulement), les premiers octets restent contrôlés : un null y ferait sauter le contrôle du
- * contenu d'un script exécuté et figerait l'empreinte d'un fichier modifié.
- */
-export type AuDelaDuPlafond = 'null' | 'tronquer';
-const contenuLu = (code: number, sortie: Buffer, plafond: number, auDela: AuDelaDuPlafond): string | null => {
+const contenuLu = (code: number, sortie: Buffer, plafond: number): LectureControlee => {
   if (code !== 0) return null;
-  if (sortie.length <= plafond) return sortie.toString('utf8');
-  return auDela === 'tronquer' ? sortie.subarray(0, plafond).toString('utf8') : null;
+  return sortie.length <= plafond ? sortie.toString('utf8') : TROP_GROS;
 };
 
-export async function lireFichierVolume(
-  docker: Docker, imageId: string, volume: string, chemin: string, plafond = PLAFOND_LECTURE, auDela: AuDelaDuPlafond = 'null',
-): Promise<string | null> {
+async function lireVolume(docker: Docker, imageId: string, volume: string, chemin: string, plafond: number): Promise<LectureControlee> {
   if (!cheminConfine(chemin)) return null;
   const r = await executerJetable(docker, imageId, commandeLecture(chemin, plafond), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
-  return contenuLu(r.code, r.stdout, plafond, auDela);
+  return contenuLu(r.code, r.stdout, plafond);
 }
+
+/** Au-delà du plafond, null : jamais un contenu tronqué présenté comme complet. */
+export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string, plafond = PLAFOND_LECTURE): Promise<string | null> {
+  const lu = await lireVolume(docker, imageId, volume, chemin, plafond);
+  return typeof lu === 'string' ? lu : null;
+}
+
+/** Lecture du gardien sur le volume d'une tâche arrêtée : au-delà du plafond ordinaire, « trop gros ». */
+export const lireFichierVolumeControle = (docker: Docker, imageId: string, volume: string, chemin: string): Promise<LectureControlee> =>
+  lireVolume(docker, imageId, volume, chemin, PLAFOND_LECTURE);
 
 // readlink -m : résout tous les liens, même si la cible finale n'existe pas encore (fichier à créer).
 const commandeResolution = (chemin: string) => ['readlink', '-m', '--', chemin];
@@ -250,15 +257,15 @@ export async function executerDans(conteneur: Docker.Container, cmd: string[], s
   return { code: info?.ExitCode ?? -1, erreurs };
 }
 
-/** Lecture du gardien dans le conteneur en cours : tronquée au plafond ordinaire (voir AuDelaDuPlafond). */
-export async function lireFichierConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {
+/** Lecture du gardien dans le conteneur en cours : au-delà du plafond ordinaire, « trop gros ». */
+export async function lireFichierConteneur(conteneur: Docker.Container, chemin: string): Promise<LectureControlee> {
   if (!cheminConfine(chemin)) return null;
   const morceaux: Buffer[] = [];
   const r = await Promise.race([
     executerDans(conteneur, commandeLecture(chemin, PLAFOND_LECTURE), m => morceaux.push(m)),
     new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
   ]);
-  return r ? contenuLu(r.code, Buffer.concat(morceaux), PLAFOND_LECTURE, 'tronquer') : null;
+  return r ? contenuLu(r.code, Buffer.concat(morceaux), PLAFOND_LECTURE) : null;
 }
 
 export async function resoudreCheminConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {

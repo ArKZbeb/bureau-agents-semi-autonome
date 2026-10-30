@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type Docker from 'dockerode';
-import { lireFichierVolume, PLAFOND_ANALYSE, PLAFOND_LECTURE } from '../../src/conteneurs/docker.ts';
+import { lireFichierVolume, lireFichierVolumeControle, PLAFOND_ANALYSE, PLAFOND_LECTURE, TROP_GROS } from '../../src/conteneurs/docker.ts';
 
 /** Trame stdout du flux multiplexé de Docker. */
 const trame = (contenu: Buffer) => {
@@ -50,10 +50,13 @@ test('plafond paramétrable : 6 Mo lus sous le plafond d’analyse, refusés au-
   assert.equal(trop.commandes[0].at(-1), String(PLAFOND_ANALYSE + 1));
 });
 
-test('lecture du gardien : au-delà du plafond, les premiers octets restent contrôlés (comportement antérieur conservé)', async () => {
-  // Un null ferait sauter le contrôle du contenu d'un script exécuté et figerait l'empreinte d'un fichier modifié.
-  const gros = Buffer.concat([Buffer.from('rm -rf /\n'), Buffer.alloc(PLAFOND_LECTURE, 'a')]);
-  const lu = await lireFichierVolume(fauxDocker(gros).docker, 'img', 'v', '/workspace/f', PLAFOND_LECTURE, 'tronquer');
-  assert.equal(lu?.length, PLAFOND_LECTURE);
-  assert.ok(lu?.startsWith('rm -rf /'));
+test('lecture du gardien : au-delà du plafond, « trop gros », jamais un extrait', async () => {
+  // Un extrait laisserait juger un fichier sur ses premiers octets : la fin d'un script ou d'un Edit échapperait au contrôle.
+  const gros = Buffer.concat([Buffer.from('echo ok\n'), Buffer.alloc(PLAFOND_LECTURE, 'a')]);
+  const trop = fauxDocker(gros);
+  assert.deepEqual(await lireFichierVolumeControle(trop.docker, 'img', 'v', '/workspace/f'), TROP_GROS);
+  assert.equal(trop.commandes[0].at(-1), String(PLAFOND_LECTURE + 1), 'lecture de plafond + 1 octets');
+  const pile = Buffer.alloc(PLAFOND_LECTURE, 'a');
+  assert.equal(await lireFichierVolumeControle(fauxDocker(pile).docker, 'img', 'v', '/workspace/f'), pile.toString('utf8'));
+  assert.equal(await lireFichierVolumeControle(fauxDocker(pile).docker, 'img', 'v', '/workspace/../etc/passwd'), null, 'hors de /workspace');
 });

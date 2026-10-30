@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import Docker from 'dockerode';
 import { construireImage } from '../src/conteneurs/image.ts';
 import {
-  arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume, PLAFOND_ANALYSE,
+  arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume, lireFichierVolumeControle, PLAFOND_ANALYSE, TROP_GROS,
   resoudreCheminConteneur, resoudreCheminVolume,
   fichierParametresVides, lireShaVolume, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
@@ -81,6 +81,8 @@ test('conteneur durci : non root, racine en lecture seule, sans capacité, sans 
   assert.equal((await sh('ln -s /etc/passwd /workspace/projet/lien && mkfifo /workspace/projet/f')).code, 0);
   assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/lien`), null, 'lien symbolique refusé');
   assert.equal(await lireFichierConteneur(c, `${RACINE_PROJET}/f`), null, 'FIFO refusée');
+  assert.equal((await sh('head -c 6291456 /dev/zero | tr "\\0" a > /workspace/projet/gros.sh')).code, 0);
+  assert.deepEqual(await lireFichierConteneur(c, `${RACINE_PROJET}/gros.sh`), TROP_GROS, 'au-delà de 5 Mo : trop gros, jamais un extrait');
   assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/lien`), null, 'lien symbolique refusé (volume)');
   assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/f`), null, 'FIFO refusée (volume)');
   assert.equal((await sh('mkdir -p /workspace/projet/src && ln -s ../.git/hooks/pre-commit /workspace/projet/src/x')).code, 0);
@@ -130,6 +132,7 @@ test('lecture plafonnée : fichier de 6 Mo refusé (null) au plafond ordinaire, 
   try {
     await executerSurVolume(volume, 'head -c 6291456 /dev/zero | tr "\\0" a > /workspace/gros.patch');
     assert.equal(await lireFichierVolume(docker, image, volume, '/workspace/gros.patch'), null, 'jamais tronqué à 5 Mo');
+    assert.deepEqual(await lireFichierVolumeControle(docker, image, volume, '/workspace/gros.patch'), TROP_GROS, 'gardien : trop gros, jamais un extrait');
     assert.equal((await lireFichierVolume(docker, image, volume, '/workspace/gros.patch', PLAFOND_ANALYSE))?.length, 6291456);
   } finally {
     await docker.getVolume(volume).remove({ force: true }).catch(() => {});
