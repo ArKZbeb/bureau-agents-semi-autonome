@@ -88,7 +88,9 @@ fi
 # de chemins), sans « gitleaks:allow », secrets masqués. Lancé depuis $HOME, vide : gitleaks lit aussi le
 # .gitleaksignore du dossier courant.
 CLONE="$HOME/gitleaks-source"
-if git clone -q --no-checkout --no-hardlinks "$PROJET" "$CLONE" > "$SORTIE/gitleaks.log" 2>&1; then
+# Base vérifiée aussi dans le clone : sans elle, gitleaks renverrait 0 et « [] » (faux négatif).
+if git clone -q --no-checkout --no-hardlinks "$PROJET" "$CLONE" > "$SORTIE/gitleaks.log" 2>&1 \
+  && git -C "$CLONE" cat-file -e "$BASE^{commit}" >> "$SORTIE/gitleaks.log" 2>&1; then
   ( cd "$HOME" && timeout 600 gitleaks git "$CLONE" --no-banner --no-color --redact --config /opt/analyse/gitleaks.toml --ignore-gitleaks-allow \
     --log-opts="$BASE..HEAD" --report-format json --report-path "$SORTIE/gitleaks.json" --exit-code 0 >> "$SORTIE/gitleaks.log" 2>&1 )
   code gitleaks $?
