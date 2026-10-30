@@ -13,10 +13,12 @@ const normaliser = (chemin: string, sources: string[]): string => {
 export function lireCobertura(xml: string): Map<string, Map<number, number>> {
   const sources = [...xml.matchAll(/<source>([^<]*)<\/source>/g)].map(m => m[1].trim().replace(/\\/g, '/').replace(/\/?$/, '/'));
   const resultat = new Map<string, Map<number, number>>();
-  for (const bloc of xml.matchAll(/<class\b[^>]*\bfilename="([^"]+)"[^>]*>([\s\S]*?)<\/class>/g)) {
-    const chemin = normaliser(bloc[1], sources);
+  for (const bloc of xml.matchAll(/<class\b([^>]*?)(?:\/>|>([\s\S]*?)<\/class>)/g)) {
+    const nom = /\bfilename="([^"]+)"/.exec(bloc[1]);
+    if (!nom) continue;
+    const chemin = normaliser(nom[1], sources);
     const lignes = resultat.get(chemin) ?? new Map<number, number>();
-    for (const l of bloc[2].matchAll(/<line\b([^>]*)>/g)) {
+    for (const l of (bloc[2] ?? '').matchAll(/<line\b([^>]*)>/g)) {
       const n = /\bnumber="(\d+)"/.exec(l[1]);
       const h = /\bhits="(\d+)"/.exec(l[1]);
       if (!n || !h) continue;
@@ -29,7 +31,7 @@ export function lireCobertura(xml: string): Map<string, Map<number, number>> {
 
 // dotnet-coverage instrumente aussi les assemblies de test : leurs lignes gonfleraient le pourcentage.
 const estFichierDeTest = (chemin: string): boolean =>
-  /(^|\/)(tests?|__tests__)\//i.test(chemin) || /(Tests?\.cs|\.(spec|test)\.[cm]?[jt]sx?)$/.test(chemin);
+  /(^|\/)(tests?|__tests__|[^/]*\.Tests?)\//i.test(chemin) || /(Tests?\.cs|\.(spec|test)\.[cm]?[jt]sx?)$/.test(chemin);
 
 export function couvertureLignesModifiees(modifiees: Map<string, Set<number>>, couvertures: Map<string, Map<number, number>>[]): Couverture {
   let total = 0;

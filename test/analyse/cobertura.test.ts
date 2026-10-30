@@ -67,3 +67,18 @@ test('spike : Angular, chemins joints à <source> /workspace/front', () => {
   const angular = lireCobertura(fs.readFileSync('test/fixtures/analyse/angular.cobertura.xml', 'utf8'));
   assert.deepEqual([...angular.keys()].sort(), ['/workspace/front/src/app/app.html', '/workspace/front/src/app/app.ts', '/workspace/front/src/app/remise.ts']);
 });
+
+test('projets de test .NET (Demo.Tests/, Demo.Test/) exclus, Demo/ compté', () => {
+  const xml = `<coverage><class filename="/workspace/projet/Demo.Tests/Fakes.cs"><line number="1" hits="1"/></class>
+<class filename="/workspace/projet/Demo.Test/F.cs"><line number="1" hits="1"/></class>
+<class filename="/workspace/projet/Demo/Service.cs"><line number="1" hits="0"/></class></coverage>`;
+  const modifiees = new Map([['Demo.Tests/Fakes.cs', new Set([1])], ['Demo.Test/F.cs', new Set([1])], ['Demo/Service.cs', new Set([1])]]);
+  assert.deepEqual(couvertureLignesModifiees(modifiees, [lireCobertura(xml)]), { couvertes: 0, total: 1, pourcentage: 0 });
+});
+
+test('<class /> auto-fermante n\'absorbe pas la classe suivante', () => {
+  const c = lireCobertura(`<coverage><class filename="/workspace/projet/a.cs" />
+<class filename="/workspace/projet/b.cs"><line number="2" hits="1"/></class></coverage>`);
+  assert.deepEqual(c.get('a.cs') === undefined ? [] : [...c.get('a.cs')!], []);
+  assert.deepEqual([...c.get('b.cs')!], [[2, 1]]);
+});
