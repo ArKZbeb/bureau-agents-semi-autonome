@@ -18,7 +18,7 @@ async function monter(panneau: Map<string, FichierPanneau> | null = null) {
     taches: () => [{ id: 'T-41' }],
     journal: id => [{ tacheId: id }],
     escalades: () => [{ id: 1 }],
-    deciderEscalade: (id, decision, commentaire) => { decisions.push([id, decision, commentaire]); return { ok: true }; },
+    deciderEscalade: (id, decision, commentaire) => { if (id === 9) throw new Error('escalade 9 déjà tranchée'); decisions.push([id, decision, commentaire]); return { ok: true }; },
     arretGlobal: async () => { arrets++; return { conteneursArretes: 2 }; },
     repriseGlobale: () => { reprises++; return { ordonnanceur: 'actif' }; },
     etat: () => ({ ordonnanceur: 'actif' }),
@@ -222,4 +222,13 @@ test('l’API exige toujours le jeton quand le panneau est servi', async () => {
   const m = await monter(PANNEAU);
   assert.equal((await m.appeler('/api/taches', { entetes: { authorization: '' } })).statut, 401);
   m.fermer();
+});
+
+test('escalade déjà tranchée : 409 avec le message, comme les autres actions', async () => {
+  const m = await monter();
+  try {
+    assert.deepEqual(await m.appeler('/api/escalades/9', { methode: 'POST', corps: { decision: 'approuver' } }), { statut: 409, corps: { erreur: 'escalade 9 déjà tranchée' } });
+  } finally {
+    m.fermer();
+  }
 });

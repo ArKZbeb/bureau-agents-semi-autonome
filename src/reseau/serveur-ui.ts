@@ -106,7 +106,7 @@ async function traiter(jeton: string, routes: RoutesUi, panneau: Map<string, Fic
     if (!corps) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
     const { decision, commentaire } = corps as { decision?: unknown; commentaire?: unknown };
     if (decision !== 'approuver' && decision !== 'refuser') return repondreJson(res, 400, { erreur: 'decision attendue : approuver ou refuser' });
-    return repondreJson(res, 200, routes.deciderEscalade(Number(escalade[1]), decision, String(commentaire ?? '')));
+    return conflit(res, () => routes.deciderEscalade(Number(escalade[1]), decision, String(commentaire ?? '')));
   }
   if (req.method === 'POST' && url.pathname === '/api/taches') {
     const c = await lireObjet(req);
