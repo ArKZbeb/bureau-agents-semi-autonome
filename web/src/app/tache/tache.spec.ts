@@ -19,7 +19,7 @@ const entree = (id: number, o: Partial<EntreeJournal> = {}): EntreeJournal => ({
 });
 
 describe('TacheVue', () => {
-  const api = { tache: vi.fn(), journal: vi.fn(), action: vi.fn(), validation: vi.fn() };
+  const api = { tache: vi.fn(), journal: vi.fn(), action: vi.fn(), validation: vi.fn(), historique: vi.fn() };
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     vi.resetAllMocks();
@@ -107,10 +107,8 @@ describe('TacheVue', () => {
   });
 
   it.each([
-    ['en_pause', 'integrite : spec altérée'],
     ['en_pause', 'arret_global : arrêt demandé'],
     ['en_pause', 'erreur_api : 529'],
-    ['bloquee', 'durée maximale dépassée'],
   ] as const)('%s / %s : raison complète et reprise', async (statut, raison) => {
     const { bouton, attendre, texte } = await ouvrir(fiche({ etape: 'implementation', statut, raison }));
     expect(texte()).toContain(raison);
@@ -118,6 +116,33 @@ describe('TacheVue', () => {
     await attendre();
     expect(api.action).toHaveBeenCalledWith('T-41', 'reprise', {});
     expect(api.tache.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('bloquée : BlocageVue avec l’historique, sans bloc de reprise', async () => {
+    api.historique.mockResolvedValue([]);
+    const { el, bouton, texte } = await ouvrir(fiche({ etape: 'implementation', statut: 'bloquee', raison: 'durée maximale dépassée' }));
+    expect(el.querySelector('app-blocage')).not.toBeNull();
+    expect(texte()).toContain('Mon bureau · Tâche bloquée');
+    expect(bouton('Reprendre')).toBeUndefined();
+    expect(api.historique).toHaveBeenCalledWith('T-41');
+  });
+
+  it('bloquée : une action recharge la fiche', async () => {
+    api.historique.mockResolvedValue([]);
+    const { bouton, attendre } = await ouvrir(fiche({ etape: 'implementation', statut: 'bloquee', raison: 'x' }));
+    const n = api.tache.mock.calls.length;
+    bouton('Relancer')!.click();
+    await attendre();
+    expect(api.action).toHaveBeenCalledWith('T-41', 'reprise', {});
+    expect(api.tache.mock.calls.length).toBeGreaterThan(n);
+  });
+
+  it('pause intégrité : AlerteVue avec la raison sans préfixe', async () => {
+    const { el, texte } = await ouvrir(fiche({ etape: 'implementation', statut: 'en_pause', raison: 'integrite : spec altérée' }));
+    expect(el.querySelector('app-alerte')).not.toBeNull();
+    expect(texte()).toContain("Poste de sécurité · Alerte d'intégrité");
+    expect(texte()).toContain('spec altérée');
+    expect(texte()).not.toContain('integrite :');
   });
 
   it('pause escalade : attente au poste de sécurité, lien, pas de bouton de reprise', async () => {

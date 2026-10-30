@@ -3,6 +3,8 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../api';
 import { LIBELLE_ETAPE, budget, eur, essai, heure, qui } from '../libelles';
 import type { EntreeJournal, FicheTache, NomAction, Tache, TypeDocument } from '../modeles';
+import { AlerteVue } from './alerte';
+import { BlocageVue } from './blocage';
 import { RapportVue } from './rapport';
 import { ValidationVue } from './validation';
 
@@ -12,11 +14,11 @@ const DOCUMENTS: { type: TypeDocument; titre: string }[] = [
 ];
 const raisonDe = (t: Tache) => (t.raison ?? '').split(' : ')[0];
 
-type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | 'escalade' | 'validation' | null;
+type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | 'escalade' | 'validation' | 'blocage' | 'alerte' | null;
 
 @Component({
   selector: 'app-tache',
-  imports: [RouterLink, RapportVue, ValidationVue],
+  imports: [RouterLink, RapportVue, ValidationVue, BlocageVue, AlerteVue],
   template: `
     @if (fiche(); as f) {
       <section class="ecran">
@@ -79,6 +81,12 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
                 <p>En attente de ta décision au poste de sécurité</p>
                 <a routerLink="/securite">Ouvrir le poste de sécurité</a>
               </div>
+            }
+            @case ('blocage') {
+              <app-blocage [tache]="f.tache" (fait)="succes.set($event); recharger()" />
+            }
+            @case ('alerte') {
+              <app-alerte [tache]="f.tache" (fait)="succes.set($event); recharger()" />
             }
             @case ('validation') {
               <app-validation [id]="id()" [fiche]="f" [journal]="journal()" (fait)="succes.set($event); recharger()" />
@@ -154,9 +162,10 @@ export class TacheVue implements OnDestroy {
     if (t.statut === 'en_pause') {
       if (raison === 'budget') return 'budget';
       if (raison === 'escalade') return 'escalade';
-      if (raison === 'integrite' || raison === 'arret_global' || raison === 'erreur_api') return 'reprise';
+      if (raison === 'integrite') return 'alerte';
+      if (raison === 'arret_global' || raison === 'erreur_api') return 'reprise';
     }
-    if (t.statut === 'bloquee') return 'reprise';
+    if (t.statut === 'bloquee') return 'blocage';
     return null;
   });
   protected readonly questions = computed(() => [...(this.fiche()?.echanges ?? [])].reverse().find(e => e.auteur === 'cadreur')?.texte ?? null);
