@@ -1,0 +1,123 @@
+<?xml version="1.0" ?>
+<!DOCTYPE coverage SYSTEM "http://cobertura.sourceforge.net/xml/coverage-04.dtd">
+<coverage lines-valid="47" lines-covered="46" line-rate="0.9787" branches-valid="9" branches-covered="8" branch-rate="0.8887999999999999" timestamp="1793321093511" complexity="0" version="0.1">
+  <sources>
+    <source>/workspace/front</source>
+  </sources>
+  <packages>
+    <package name="main" line-rate="0.9787" branch-rate="0.8887999999999999">
+      <classes>
+        <class name="app.html" filename="src/app/app.html" line-rate="1" branch-rate="1">
+          <methods>
+            <method name="(anonymous_0)" hits="1" signature="()V">
+              <lines>
+                <line number="242" hits="1"/>
+              </lines>
+            </method>
+            <method name="(anonymous_1)" hits="1" signature="()V">
+              <lines>
+                <line number="243" hits="1"/>
+              </lines>
+            </method>
+            <method name="(anonymous_2)" hits="1" signature="()V">
+              <lines>
+                <line number="244" hits="1"/>
+              </lines>
+            </method>
+            <method name="(anonymous_3)" hits="1" signature="()V">
+              <lines>
+                <line number="245" hits="1"/>
+              </lines>
+            </method>
+            <method name="(anonymous_4)" hits="1" signature="()V">
+              <lines>
+                <line number="246" hits="1"/>
+              </lines>
+            </method>
+            <method name="(anonymous_5)" hits="1" signature="()V">
+              <lines>
+                <line number="247" hits="1"/>
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="187" hits="2" branch="false"/>
+            <line number="190" hits="2" branch="false"/>
+            <line number="197" hits="2" branch="false"/>
+            <line number="205" hits="2" branch="false"/>
+            <line number="206" hits="2" branch="false"/>
+            <line number="215" hits="2" branch="false"/>
+            <line number="218" hits="2" branch="false"/>
+            <line number="219" hits="2" branch="false"/>
+            <line number="227" hits="2" branch="false"/>
+            <line number="231" hits="2" branch="false"/>
+            <line number="232" hits="2" branch="false"/>
+            <line number="235" hits="4" branch="false"/>
+            <line number="236" hits="2" branch="false"/>
+            <line number="238" hits="2" branch="false"/>
+            <line number="239" hits="2" branch="false"/>
+            <line number="241" hits="4" branch="false"/>
+            <line number="242" hits="2" branch="false"/>
+            <line number="243" hits="2" branch="false"/>
+            <line number="244" hits="2" branch="false"/>
+            <line number="245" hits="2" branch="false"/>
+            <line number="246" hits="2" branch="false"/>
+            <line number="247" hits="2" branch="false"/>
+            <line number="249" hits="6" branch="false"/>
+            <line number="251" hits="6" branch="false"/>
+            <line number="255" hits="18" branch="false"/>
+            <line number="256" hits="6" branch="false"/>
+            <line number="263" hits="6" branch="false"/>
+            <line number="266" hits="6" branch="false"/>
+            <line number="269" hits="2" branch="false"/>
+            <line number="270" hits="2" branch="false"/>
+            <line number="277" hits="2" branch="false"/>
+            <line number="285" hits="2" branch="false"/>
+            <line number="288" hits="2" branch="false"/>
+            <line number="290" hits="2" branch="false"/>
+            <line number="296" hits="2" branch="false"/>
+            <line number="304" hits="2" branch="false"/>
+            <line number="307" hits="2" branch="false"/>
+            <line number="309" hits="2" branch="false"/>
+            <line number="315" hits="2" branch="false"/>
+            <line number="323" hits="2" branch="false"/>
+            <line number="328" hits="2" branch="false"/>
+            <line number="344" hits="2" branch="false"/>
+          </lines>
+        </class>
+        <class name="app.ts" filename="src/app/app.ts" line-rate="1" branch-rate="1">
+          <methods>
+            <method name="App_Factory" hits="3" signature="()V">
+              <lines>
+                <line number="10" hits="3"/>
+              </lines>
+            </method>
+            <method name="App_Template" hits="3" signature="()V">
+              <lines>
+                <line number="10" hits="3"/>
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="10" hits="5" branch="true" condition-coverage="100% (5/5)"/>
+            <line number="11" hits="2" branch="true" condition-coverage="100% (1/1)"/>
+          </lines>
+        </class>
+        <class name="remise.ts" filename="src/app/remise.ts" line-rate="0.6666" branch-rate="0.6666">
+          <methods>
+            <method name="appliquerRemise" hits="1" signature="()V">
+              <lines>
+                <line number="1" hits="1"/>
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="2" hits="1" branch="true" condition-coverage="66.66666666666666% (2/3)"/>
+            <line number="3" hits="0" branch="false"/>
+            <line number="5" hits="1" branch="false"/>
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>

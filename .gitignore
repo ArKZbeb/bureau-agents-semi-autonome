@@ -1,3 +1,5 @@
 node_modules/
 conteneur/certificats/*
 !conteneur/certificats/.gitkeep
+# Règles Semgrep (licence non libre) : téléchargées à la construction de l’image, jamais versionnées.
+conteneur/analyse/semgrep-regles.yml
