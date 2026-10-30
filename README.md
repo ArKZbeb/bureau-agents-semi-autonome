@@ -122,5 +122,10 @@ npm run image
 npm test
 npm run typecheck
 npm run test:docker
+npm --prefix web ci && npm run web:build   # panneau web, à relancer après toute modification de web/
 ANTHROPIC_API_KEY=... NODE_EXTRA_CA_CERTS=/chemin/vers/certificat-racine.pem npm run demarrer
 ```
+
+Lancement : `npm run demarrer` affiche un lien `http://127.0.0.1:4310/#jeton=…` ; ouvre-le dans ton navigateur
+(le lien contient le jeton de session : ne le partage pas). Le panneau efface le jeton de la barre d'adresse
+et le garde pour la session de l'onglet.

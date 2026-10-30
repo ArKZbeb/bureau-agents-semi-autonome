@@ -76,4 +76,5 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
   `conteneur/` ont changé).
 - Analyse de review : outils (Semgrep, gitleaks, dotnet, Angular) dans l'image des agents, lancés par l'orchestrateur dans deux conteneurs durcis
   (`mesurer.sh` puis `tester.sh`) ; toute modification de `conteneur/analyse/` exige `npm run image`.
-- Lancement : `ANTHROPIC_API_KEY=… npm run demarrer` (serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311).
+- Panneau web : `npm --prefix web ci` (première fois), `npm run web:build` (à relancer après toute modification de `web/`), tests `npm run test:web`. Le front Angular 21 a son propre `package.json` (TypeScript 5.9) ; la racine reste en TypeScript 6.
+- Lancement : `ANTHROPIC_API_KEY=… npm run demarrer`, puis ouvrir le lien affiché (`http://127.0.0.1:4310/#jeton=…`) ; serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311.
