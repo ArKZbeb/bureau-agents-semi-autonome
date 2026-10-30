@@ -5,6 +5,11 @@ import type { Detection, EntreeJournal, Escalade, EtatGlobal, FicheTache, Integr
 
 export const JETON = new InjectionToken<string>('jeton de session');
 
+/** Erreur d'appel à l'orchestrateur ; `statut` vaut 0 quand il ne répond pas. */
+export class ErreurApi extends Error {
+  constructor(message: string, readonly statut: number) { super(message); }
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
@@ -14,8 +19,8 @@ export class ApiService {
     try {
       return await firstValueFrom(o);
     } catch (e) {
-      const message = e instanceof HttpErrorResponse ? (e.error?.erreur ?? `${e.status} ${e.statusText}`) : (e as Error).message;
-      throw new Error(message);
+      if (e instanceof HttpErrorResponse) throw new ErreurApi(e.error?.erreur ?? `${e.status} ${e.statusText}`, e.status);
+      throw new ErreurApi((e as Error).message, 0);
     }
   }
   private get<T>(url: string) { return this.appel(this.http.get<T>(url, { headers: this.entetes })); }

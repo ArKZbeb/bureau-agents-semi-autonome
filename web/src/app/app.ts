@@ -28,7 +28,8 @@ import { EtatBureau } from './etat';
           <button (click)="confirmation.set('reprise')">▶ Tout reprendre</button>
         }
       </header>
-      @if (etat.erreur(); as e) { <p class="alerte">Orchestrateur injoignable : {{ e }}</p> }
+      @if (etat.sessionExpiree()) { <p class="alerte">Session expirée : rouvre le lien affiché au démarrage de l'orchestrateur.</p> }
+      @else if (etat.erreur(); as e) { <p class="alerte">Orchestrateur injoignable : {{ e }}</p> }
       @if (echecAction(); as m) { <p class="alerte">{{ m }}</p> }
       <router-outlet />
       @if (confirmation() === 'arret') {

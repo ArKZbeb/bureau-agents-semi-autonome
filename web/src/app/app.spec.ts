@@ -9,7 +9,7 @@ import { EtatBureau } from './etat';
 describe('App', () => {
   const api = { arretGlobal: vi.fn(), repriseGlobale: vi.fn() };
   const etat = {
-    escalades: signal([]), etat: signal({ ordonnanceur: 'actif' }), erreur: signal<string | null>(null),
+    escalades: signal([]), etat: signal({ ordonnanceur: 'actif' }), erreur: signal<string | null>(null), sessionExpiree: signal(false),
     demarrer: vi.fn(), arreter: vi.fn(), rafraichir: vi.fn(),
   };
 
@@ -27,7 +27,7 @@ describe('App', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    etat.etat.set({ ordonnanceur: 'actif' });
+    etat.etat.set({ ordonnanceur: 'actif' }); etat.erreur.set(null); etat.sessionExpiree.set(false);
     api.arretGlobal.mockResolvedValue({});
     etat.rafraichir.mockResolvedValue(undefined);
   });
@@ -79,5 +79,18 @@ describe('App', () => {
     bouton(el, 'Reprendre').click();
     await Promise.resolve();
     expect(api.repriseGlobale).toHaveBeenCalledTimes(1);
+  });
+
+  it('API injoignable : bandeau « Orchestrateur injoignable »', () => {
+    etat.erreur.set('Http failure');
+    const el = creer('jeton');
+    expect(el.textContent).toContain('Orchestrateur injoignable : Http failure');
+  });
+
+  it('jeton refusé (401) : session expirée, rouvrir le lien du démarrage', () => {
+    etat.erreur.set('jeton de session requis'); etat.sessionExpiree.set(true);
+    const el = creer('jeton');
+    expect(el.textContent).toContain("Session expirée : rouvre le lien affiché au démarrage de l'orchestrateur.");
+    expect(el.textContent).not.toContain('Orchestrateur injoignable');
   });
 });

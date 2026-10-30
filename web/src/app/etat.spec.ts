@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiService } from './api';
+import { ApiService, ErreurApi } from './api';
 import { EtatBureau } from './etat';
 
 describe('EtatBureau', () => {
@@ -57,5 +57,18 @@ describe('EtatBureau', () => {
     fin([{ id: 'T-1' }]);
     await premier;
     expect(e.taches()).toEqual([{ id: 'T-1' }]);
+  });
+
+  it('401 : session expirée signalée, puis levée dès que l’API répond', async () => {
+    const e = TestBed.inject(EtatBureau);
+    api.taches.mockRejectedValueOnce(new ErreurApi('jeton de session requis', 401));
+    await e.rafraichir();
+    expect(e.sessionExpiree()).toBe(true);
+    await e.rafraichir();
+    expect(e.sessionExpiree()).toBe(false);
+    api.taches.mockRejectedValueOnce(new ErreurApi('Http failure', 0));
+    await e.rafraichir();
+    expect(e.sessionExpiree()).toBe(false);
+    expect(e.erreur()).toBe('Http failure');
   });
 });

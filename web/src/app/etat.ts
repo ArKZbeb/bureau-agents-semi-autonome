@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { ApiService } from './api';
+import { ApiService, ErreurApi } from './api';
 import type { Escalade, EtatGlobal, Projet, Tache } from './modeles';
 
 @Injectable({ providedIn: 'root' })
@@ -11,6 +11,8 @@ export class EtatBureau {
   readonly projets = signal<Projet[]>([]);
   readonly etat = signal<EtatGlobal>({ ordonnanceur: 'actif' });
   readonly erreur = signal<string | null>(null);
+  /** Jeton refusé (401) : l'orchestrateur a redémarré avec un nouveau jeton. */
+  readonly sessionExpiree = signal(false);
 
   private enCours = false;
 
@@ -20,9 +22,10 @@ export class EtatBureau {
     try {
       const [taches, escalades, projets, etat] = await Promise.all([this.api.taches(), this.api.escalades(), this.api.projets(), this.api.etat()]);
       this.taches.set(taches); this.escalades.set(escalades); this.projets.set(projets); this.etat.set(etat);
-      this.erreur.set(null);
+      this.erreur.set(null); this.sessionExpiree.set(false);
     } catch (e) {
       this.erreur.set((e as Error).message);
+      this.sessionExpiree.set(e instanceof ErreurApi && e.statut === 401);
     } finally {
       this.enCours = false;
     }

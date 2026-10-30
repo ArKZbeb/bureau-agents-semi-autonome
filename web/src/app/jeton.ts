@@ -11,3 +11,14 @@ export function lireJeton(hash: string, stockage: Pick<Storage, 'getItem' | 'set
   const range = stockage.getItem('jeton');
   return range && FORME.test(range) ? range : null;
 }
+
+/** Au chargement : range le jeton du fragment puis efface celui-ci de l'URL (barre d'adresse, partage, capture). */
+export function rangerJetonDuFragment(
+  lieu: Pick<Location, 'hash' | 'pathname' | 'search'>,
+  stockage: Pick<Storage, 'getItem' | 'setItem'>,
+  historique: Pick<History, 'replaceState'>,
+): void {
+  if (!lieu.hash.startsWith('#jeton=')) return;
+  lireJeton(lieu.hash, stockage);
+  historique.replaceState(null, '', lieu.pathname + lieu.search);
+}
