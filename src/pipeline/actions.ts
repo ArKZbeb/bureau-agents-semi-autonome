@@ -1,7 +1,7 @@
 import type { Base } from '../db.ts';
 import { enregistrerArtefact } from '../integrite/artefacts.ts';
 import { ajouterAuJournal } from '../integrite/journal.ts';
-import { appliquer, augmenterBudget, listerTaches, lireTache, type Tache } from '../taches/depot.ts';
+import { appliquer, augmenterBudget, definirReprise, listerTaches, lireTache, type Tache } from '../taches/depot.ts';
 import { RAISON_PROPOSITION, transition } from '../taches/etats.ts';
 import { ajouterEchange, lireProposition, supprimerProposition } from '../taches/echanges.ts';
 import { numeroterCriteres } from './prompts.ts';
@@ -59,6 +59,10 @@ export function reprendre(db: Base, cle: Buffer, tacheId: string): Tache {
   return suite;
 }
 
+const verifierAucunAgent = (t: Tache) => {
+  if (t.agent !== null) throw new Error(`${t.id} : un agent travaille encore, réessaie dans un instant`);
+};
+
 const retour = (db: Base, cle: Buffer, tacheId: string, vers: 'implementation' | 'cadrage', texte: string) =>
   enregistrerArtefact(db, cle, tacheId, 'retour_humain', JSON.stringify({ vers, texte }));
 
@@ -76,9 +80,11 @@ export function renvoyer(db: Base, cle: Buffer, tacheId: string, commentaire: st
 
 export function relancer(db: Base, cle: Buffer, tacheId: string, vers: 'implementation' | 'cadrage', commentaire: string | null): Tache {
   const t = lireTache(db, tacheId);
+  verifierAucunAgent(t);
   transition(t, { type: 'relance', vers }); // lève avant toute signature si la relance est impossible
   const texte = commentaire?.trim();
   if (texte) retour(db, cle, tacheId, vers, texte);
+  definirReprise(db, tacheId, null); // une ancienne session ne reprend jamais dans une nouvelle étape
   const suite = appliquer(db, tacheId, { type: 'relance', vers });
   journaliser(db, cle, tacheId, `relance (${vers === 'implementation' ? 'implémentation' : 'cadrage'})`, texte?.slice(0, 200) || t.raison || t.statut);
   return suite;
@@ -86,7 +92,9 @@ export function relancer(db: Base, cle: Buffer, tacheId: string, vers: 'implemen
 
 export function abandonner(db: Base, cle: Buffer, tacheId: string): Tache {
   const t = lireTache(db, tacheId);
+  verifierAucunAgent(t);
   const suite = appliquer(db, tacheId, { type: 'abandon' });
+  definirReprise(db, tacheId, null);
   journaliser(db, cle, tacheId, 'abandon de la tâche', t.raison ?? t.statut);
   return suite;
 }

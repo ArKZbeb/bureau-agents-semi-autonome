@@ -91,6 +91,10 @@ test('relance après une alerte d’intégrité : compte un no-go', () => {
   const derniere = { ...pause, essaisQa: 2 };
   assert.deepEqual(transition(derniere, { type: 'relance', vers: 'implementation' }), { ...derniere, statut: 'bloquee', essaisQa: 3, raison: '3 no-go du QA : la tâche me revient' });
   assert.throws(() => transition(pause, { type: 'relance', vers: 'cadrage' }), TransitionInvalide);
+  for (const etape of ['cadrage', 'patron_plan'] as const)
+    assert.throws(() => transition({ ...pause, etape }, { type: 'relance', vers: 'implementation' }), TransitionInvalide);
+  for (const etape of ['implementation', 'review', 'patron_code'] as const)
+    assert.equal(transition({ ...pause, etape }, { type: 'relance', vers: 'implementation' }).statut, 'prete');
 });
 
 test('relance refusée hors blocage et hors alerte d’intégrité', () => {

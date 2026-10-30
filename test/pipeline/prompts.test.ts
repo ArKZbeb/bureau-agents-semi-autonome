@@ -109,3 +109,31 @@ test('cadrage : retour humain transmis seulement s’il vise le cadrage et suit 
   enregistrerArtefact(db, cle, 'T-41', 'spec', '# Spec 2');
   assert.equal('retour_humain' in documentsEtape(db, cle, lireTache(db, 'T-41')), false);
 });
+
+test('implémentation après relance d’intégrité sans verdict : pas d’anomalie, rapports présents transmis', () => {
+  const { db } = tache('implementation', 1);
+  db.prepare("DELETE FROM artefacts WHERE type = 'verdict'").run();
+  db.prepare("DELETE FROM artefacts_tete WHERE type = 'verdict'").run();
+  const d = documentsEtape(db, cle, lireTache(db, 'T-41'));
+  assert.equal('verdict_qa' in d, false);
+  assert.equal(d.rapport_review, 'RAS');
+});
+
+test('implémentation : version de verdict supprimée = anomalie', () => {
+  const { db } = tache('implementation', 1);
+  db.prepare("DELETE FROM artefacts WHERE type = 'verdict'").run();
+  assert.throws(() => documentsEtape(db, cle, lireTache(db, 'T-41')), AnomalieIntegrite);
+});
+
+test('retour humain illisible = anomalie', () => {
+  const { db } = tache('cadrage');
+  enregistrerArtefact(db, cle, 'T-41', 'retour_humain', 'pas du json');
+  assert.throws(() => documentsEtape(db, cle, lireTache(db, 'T-41')), /retour humain illisible/);
+});
+
+test('cadrage avec retour humain : spec et plan validés précédemment transmis', () => {
+  const { db } = tache('cadrage');
+  retour(db, 'cadrage', 'Revois le périmètre');
+  const d = documentsEtape(db, cle, lireTache(db, 'T-41'));
+  assert.deepEqual([d.spec_precedente, d.plan_precedent], ['# Spec', '# Plan']);
+});

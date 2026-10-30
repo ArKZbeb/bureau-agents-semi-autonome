@@ -54,7 +54,7 @@ export function transition(e: EtatTache, ev: Evenement): EtatTache {
     case 'relance': {
       if (e.statut === 'bloquee') return ev.vers === 'implementation' ? prete('implementation', { essaisQa: 0 }) : prete('cadrage', { essaisQa: 0, echangesPlan: 0 });
       // Alerte d'intégrité : « compter comme no-go et relancer ».
-      if (e.statut !== 'en_pause' || !e.raison?.startsWith('integrite') || ev.vers !== 'implementation') return refuser();
+      if (e.statut !== 'en_pause' || !e.raison?.startsWith('integrite') || ev.vers !== 'implementation' || !['implementation', 'review', 'patron_code', 'qa'].includes(e.etape)) return refuser();
       const essaisQa = e.essaisQa + 1;
       return essaisQa < MAX_ESSAIS_QA
         ? prete('implementation', { essaisQa })

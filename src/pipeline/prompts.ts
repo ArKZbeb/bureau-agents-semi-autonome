@@ -33,7 +33,9 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
   const retourHumain = (vers: 'implementation' | 'cadrage', apres: TypeArtefact): string | null => {
     const r = lireArtefact(db, cle, tache.id, 'retour_humain');
     if (!r) return null;
-    const v = JSON.parse(r.contenu) as { vers: string; texte: string };
+    let v: { vers: string; texte: string };
+    try { v = JSON.parse(r.contenu) as { vers: string; texte: string }; } catch { throw new AnomalieIntegrite('retour_humain', 'retour humain illisible'); }
+    if (typeof v?.texte !== 'string') throw new AnomalieIntegrite('retour_humain', 'retour humain illisible');
     const dernier = lireArtefact(db, cle, tache.id, apres);
     return v.vers === vers && (!dernier || dernier.id < r.id) ? v.texte : null;
   };
@@ -46,17 +48,25 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
       if (p) d.proposition_precedente = JSON.stringify(p);
       if (tache.echangesPlan > 0) d.avis_patron = doc('avis_patron');
       const retourCadrage = retourHumain('cadrage', 'spec');
-      if (retourCadrage) d.retour_humain = retourCadrage;
+      if (retourCadrage) {
+        d.retour_humain = retourCadrage;
+        // Spec et plan déjà validés : le cadreur repart de cette base.
+        for (const [cleDoc, type] of [['spec_precedente', 'spec'], ['plan_precedent', 'plan']] as const) {
+          const a = lireArtefact(db, cle, tache.id, type);
+          if (a) d[cleDoc] = a.contenu;
+        }
+      }
       return d;
     }
     case 'patron_plan':
       return { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan') };
     case 'implementation': {
       const d: Record<string, string> = { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan') };
-      if (tache.essaisQa > 0) Object.assign(d, { verdict_qa: doc('verdict'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code'), analyse: doc('analyse') });
       const retourImpl = retourHumain('implementation', 'resume');
-      if (retourImpl) {
-        d.retour_humain = retourImpl;
+      if (retourImpl) d.retour_humain = retourImpl;
+      // Rapports d'un essai précédent : lus s'ils existent (une relance peut précéder tout verdict) ;
+      // lireArtefact vérifie la tête signée, une version supprimée reste une anomalie.
+      if (tache.essaisQa > 0 || retourImpl) {
         for (const [cleDoc, type] of [['verdict_qa', 'verdict'], ['rapport_review', 'rapport'], ['avis_patron_code', 'avis_patron_code'], ['analyse', 'analyse']] as const) {
           const a = lireArtefact(db, cle, tache.id, type);
           if (a) d[cleDoc] = a.contenu;

@@ -130,7 +130,8 @@ test('renvoyer : commentaire vide ou tâche hors validation = refus sans signatu
   assert.throws(() => renvoyer(db, cle, 'T-43', '   '), new Error('commentaire requis'));
   assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain'), undefined);
   const db2 = tache();
-  assert.throws(() => renvoyer(db2, cle, 'T-43', 'ok'), Error);
+  assert.throws(() => renvoyer(db2, cle, 'T-43', 'ok'), /n’attend pas ma validation/);
+  assert.equal(lireJournal(db2, 'T-43').length, 0);
   assert.equal(lireArtefact(db2, cle, 'T-43', 'retour_humain'), undefined);
 });
 
@@ -151,14 +152,46 @@ test('relancer : avec ou sans commentaire, vers l’implémentation ou le cadrag
 
 test('relancer : état invalide = erreur, rien de signé', () => {
   const db = tache();
-  assert.throws(() => relancer(db, cle, 'T-43', 'implementation', 'Vas-y'), Error);
+  assert.throws(() => relancer(db, cle, 'T-43', 'implementation', 'Vas-y'), /transition « relance » impossible/);
+  assert.equal(lireJournal(db, 'T-43').length, 0);
   assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain'), undefined);
 });
 
 test('abandonner : depuis bloquée oui, depuis en cours non', () => {
   const db = tache();
-  assert.throws(() => abandonner(db, cle, 'T-43'), Error);
+  assert.throws(() => abandonner(db, cle, 'T-43'), /transition « abandon » impossible/);
+  assert.equal(lireJournal(db, 'T-43').length, 0);
   bloquee(db);
   assert.equal(abandonner(db, cle, 'T-43').statut, 'abandonnee');
   assert.equal(lireJournal(db, 'T-43').at(-1)?.commande, 'abandon de la tâche');
+});
+
+test('relancer vers le cadrage avec commentaire, et relance après alerte d’intégrité', () => {
+  const db = tache();
+  bloquee(db);
+  const t = relancer(db, cle, 'T-43', 'cadrage', 'Revois le périmètre');
+  assert.deepEqual([t.etape, t.statut, t.essaisQa, t.echangesPlan], ['cadrage', 'prete', 0, 0]);
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain')?.contenu, '{"vers":"cadrage","texte":"Revois le périmètre"}');
+  const db2 = tache();
+  db2.prepare("UPDATE taches SET etape = 'qa', statut = 'en_pause', raison = 'integrite : la branche a changé', essais_qa = 1 WHERE id = 'T-43'").run();
+  const t2 = relancer(db2, cle, 'T-43', 'implementation', null);
+  assert.deepEqual([t2.etape, t2.statut, t2.essaisQa], ['implementation', 'prete', 2]);
+});
+
+test('relancer et abandonner refusent tant qu’un agent travaille ; la reprise est effacée sinon', () => {
+  const db = tache();
+  bloquee(db);
+  db.prepare("UPDATE taches SET agent = 'implementeur' WHERE id = 'T-43'").run();
+  assert.throws(() => relancer(db, cle, 'T-43', 'implementation', 'x'), /un agent travaille encore/);
+  assert.throws(() => abandonner(db, cle, 'T-43'), /un agent travaille encore/);
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain'), undefined);
+  assert.equal(lireJournal(db, 'T-43').length, 0);
+  db.prepare("UPDATE taches SET agent = NULL, reprise = '{\"session\":\"s\"}' WHERE id = 'T-43'").run();
+  relancer(db, cle, 'T-43', 'implementation', null);
+  assert.equal(lireTache(db, 'T-43').reprise, null);
+  const db2 = tache();
+  bloquee(db2);
+  db2.prepare("UPDATE taches SET reprise = '{\"session\":\"s\"}' WHERE id = 'T-43'").run();
+  abandonner(db2, cle, 'T-43');
+  assert.equal(lireTache(db2, 'T-43').reprise, null);
 });
