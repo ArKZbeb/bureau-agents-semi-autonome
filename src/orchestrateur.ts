@@ -119,7 +119,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     controler: d => (client
       ? demanderControle(client, optionsControle, d)
       : Promise.resolve({ verdict: 'indisponible' as const, constats: ['clé API absente : contrôleur d’intégrité indisponible'], coutUsd: 0 })),
-    lireFichier: (id, chemin) => lireFichierVolume(docker, manifeste.image, nomRessource(id), chemin),
+    lireFichier: (volume, chemin) => lireFichierVolume(docker, manifeste.image, volume, chemin),
   };
   const ordonnanceur = creerOrdonnanceur(pipeline, { simultanees: config.tachesSimultanees, intervalleMs: 5_000, delaisErreurApiMs: [60_000, 300_000, 900_000] });
 

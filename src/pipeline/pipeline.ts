@@ -20,7 +20,8 @@ export type DepsPipeline = {
   copie: (tacheId: string, neuve: boolean) => Promise<string>;
   supprimerCopie: (tacheId: string) => Promise<void>;
   controler: (d: DemandeControle) => Promise<Controle>;
-  lireFichier: (tacheId: string, chemin: string) => Promise<string | null>;
+  /** Lecture d'un fichier dans un volume (la copie de contrôle du cadreur), avant sa suppression. */
+  lireFichier: (volume: string, chemin: string) => Promise<string | null>;
 };
 
 export const RELAIS: Partial<Record<EtapeAgent, string>> = {
@@ -98,9 +99,10 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
           ajouterEchange(db, tacheId, 'cadreur', (s.questions ?? []).join('\n'));
           t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: 'questions' });
         } else {
-          // Copie non signée des fichiers du cadreur : c'est elle que je valide, jamais une relecture du workspace.
-          const spec = (await deps.lireFichier(tacheId, '/workspace/cadrage/spec.md'))?.trim() ?? '';
-          const plan = (await deps.lireFichier(tacheId, '/workspace/cadrage/plan.md'))?.trim() ?? '';
+          // Copie non signée des fichiers du cadreur, lue dans SA copie de contrôle avant suppression : c'est elle que je valide.
+          if (!volume) throw new Error('cadrage sans copie de contrôle');
+          const spec = (await deps.lireFichier(volume, '/workspace/cadrage/spec.md'))?.trim() ?? '';
+          const plan = (await deps.lireFichier(volume, '/workspace/cadrage/plan.md'))?.trim() ?? '';
           const criteres = extraireCriteres(spec);
           if (!spec || !plan || !criteres.length) {
             t = appliquer(db, tacheId, { type: 'bloquee', detail: 'documents du cadreur incomplets : spec.md avec critères numérotés et plan.md attendus' });

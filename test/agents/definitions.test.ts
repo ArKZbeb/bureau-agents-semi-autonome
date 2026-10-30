@@ -22,8 +22,8 @@ test('modèles, durées et espaces de la spec', () => {
   assert.equal(agentPour('qa', config, process.cwd()).modele, 'claude-opus-5-5');
   assert.equal(agentPour('implementation', config, process.cwd()).dureeMaxMs, 60 * 60_000);
   assert.equal(DEFINITIONS.implementation.espace, 'branche');
-  assert.equal(DEFINITIONS.cadrage.espace, 'branche');
-  for (const e of ['patron_plan', 'review', 'patron_code', 'qa'] as const) assert.equal(DEFINITIONS[e].espace, 'copie');
+  // Le cadreur n'écrit que ses documents : il travaille sur la copie de contrôle, jamais sur la branche.
+  for (const e of ['cadrage', 'patron_plan', 'review', 'patron_code', 'qa'] as const) assert.equal(DEFINITIONS[e].espace, 'copie');
 });
 
 test('sortie du cadreur : questions non vides ou proposition, sinon illisible', () => {

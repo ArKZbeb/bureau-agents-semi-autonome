@@ -24,6 +24,7 @@ function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: R
   const appels: { agent: Agent; prompt: string; volume?: string }[] = [];
   const controles: DemandeControle[] = [];
   const copies: string[] = [];
+  const lectures: string[] = [];
   const deps: DepsPipeline = {
     db, cle, config: chargerConfig({}), racineDepot: process.cwd(),
     executer: async (id, agent, prompt, options) => {
@@ -34,11 +35,11 @@ function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: R
       return o.issue ?? { issue: 'terminee', resultat: '', sortie: sorties.shift() };
     },
     copie: async (id, neuve) => { copies.push(`${neuve ? 'neuve' : 'reprise'}:${id}`); return 'bureau-t-41-controle'; },
-    supprimerCopie: async id => { copies.push(`supprimee:${id}`); },
+    supprimerCopie: async id => { copies.push(`supprimee:${id}`); lectures.push('copie supprimée'); },
     controler: async d => { controles.push(d); return { verdict: o.controle ?? 'ok', constats: o.controle === 'signaler' ? ['critère 1 retiré'] : [], coutUsd: 0.001 }; },
-    lireFichier: async (_id, chemin) => o.fichiers?.[chemin] ?? null,
+    lireFichier: async (volume, chemin) => { lectures.push(`${volume}:${chemin}`); return o.fichiers?.[chemin] ?? null; },
   };
-  return { db, deps, appels, controles, copies };
+  return { db, deps, appels, controles, copies, lectures };
 }
 
 function valider(db: ReturnType<typeof ouvrirBase>) {
@@ -57,13 +58,17 @@ test('cadrage : questions enregistrées, tâche en attente de ma réponse', asyn
   assert.deepEqual([t.etape, t.statut, t.raison, t.agent], ['cadrage', 'attente_humain', RAISON_QUESTIONS, null]);
   assert.deepEqual(listerEchanges(db, 'T-41').map(e => [e.auteur, e.texte]), [['cadreur', 'Format A4 ?\nLogo inclus ?']]);
   assert.equal(appels[0].agent.nom, 'cadreur');
-  assert.equal(appels[0].volume, undefined);
+  assert.equal(appels[0].volume, 'bureau-t-41-controle', 'le cadreur travaille sur la copie, jamais sur la branche');
   assert.ok(appels[0].prompt.includes('Exporter la fiche film en PDF'));
 });
 
 test('cadrage : fichiers du cadreur copiés en brouillon, rien de signé', async () => {
-  const { db, deps } = banc([{ type: 'proposition' }], { fichiers: { '/workspace/cadrage/spec.md': SPEC, '/workspace/cadrage/plan.md': PLAN } });
+  const { db, deps, copies, lectures } = banc([{ type: 'proposition' }], { fichiers: { '/workspace/cadrage/spec.md': SPEC, '/workspace/cadrage/plan.md': PLAN } });
   const t = await avancer(deps, 'T-41');
+  assert.deepEqual(copies, ['neuve:T-41', 'supprimee:T-41']);
+  assert.deepEqual(lectures, [
+    'bureau-t-41-controle:/workspace/cadrage/spec.md', 'bureau-t-41-controle:/workspace/cadrage/plan.md', 'copie supprimée',
+  ], 'spec.md et plan.md lus dans le volume de la copie, avant sa suppression');
   assert.deepEqual([t.statut, t.raison], ['attente_humain', RAISON_PROPOSITION]);
   assert.deepEqual(lireProposition(db, 'T-41'), { spec: SPEC, criteres: ['Le PDF contient le synopsis'], plan: PLAN });
   assert.equal(lireArtefact(db, cle, 'T-41', 'plan'), undefined);

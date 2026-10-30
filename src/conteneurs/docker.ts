@@ -249,7 +249,8 @@ export async function preparerCopieControle(docker: Docker, imageId: string, tac
     `cd ${RACINE_PROJET}`,
     `git config user.name "Bureau d'agents"`,
     'git config user.email bureau@localhost',
-    `mkdir -p ${DOSSIER_ETAT}`,
+    // Le cadreur écrit spec.md et plan.md dans la copie : jamais dans l'espace de la branche.
+    `mkdir -p ${DOSSIER_ETAT} ${DOSSIER_CADRAGE}`,
   ].join(' && ');
   const r = await executerJetable(docker, imageId, ['sh', '-c', script], [
     { Type: 'volume', Source: volume, Target: '/workspace' },

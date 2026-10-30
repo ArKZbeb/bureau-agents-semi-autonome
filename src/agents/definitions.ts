@@ -8,7 +8,7 @@ import type { Etape } from '../taches/etats.ts';
 export type EtapeAgent = Exclude<Etape, 'validation'>;
 
 // Objet plat (pas d'union à la racine) : --json-schema attend un schéma objet ; la cohérence est vérifiée ici.
-// Les documents eux-mêmes sont écrits par le cadreur dans /workspace/cadrage (spec.md, plan.md).
+// Les documents eux-mêmes sont écrits par le cadreur dans /workspace/cadrage (spec.md, plan.md) de la copie de contrôle.
 export const SortieCadreur = z.object({
   type: z.enum(['questions', 'proposition']),
   questions: z.array(z.string().min(1)).optional(),
@@ -29,7 +29,7 @@ export type Definition = {
 
 const MIN = 60_000;
 export const DEFINITIONS: Record<EtapeAgent, Definition> = {
-  cadrage: { agent: 'cadreur', fichier: 'cadreur.md', schema: SortieCadreur, espace: 'branche', maxTours: 80, dureeMaxMs: 30 * MIN },
+  cadrage: { agent: 'cadreur', fichier: 'cadreur.md', schema: SortieCadreur, espace: 'copie', maxTours: 80, dureeMaxMs: 30 * MIN },
   patron_plan: { agent: 'patron', fichier: 'patron-plan.md', schema: SortiePatronPlan, espace: 'copie', maxTours: 40, dureeMaxMs: 30 * MIN },
   implementation: { agent: 'implementeur', fichier: 'implementeur.md', schema: SortieImplementeur, espace: 'branche', maxTours: 200, dureeMaxMs: 60 * MIN },
   review: { agent: 'reviewer', fichier: 'reviewer.md', schema: SortieReviewer, espace: 'copie', maxTours: 80, dureeMaxMs: 30 * MIN },

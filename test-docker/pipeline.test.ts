@@ -30,6 +30,7 @@ const tours: Tour[] = [
   ecrire('/workspace/cadrage/spec.md', '# Spec\n\nExport PDF.\n\n## Critères d’acceptation\n\n1. Le fichier src/export.js existe\n'),
   ecrire('/workspace/cadrage/plan.md', '# Plan\n\n## Zones touchées\n\n- `src/**`\n'),
   ecrire(`${RACINE_PROJET}/src/cadreur.js`, 'x'),
+  bash('mkdir -p src && echo x > src/cadreur-shell.js', 'écriture par le shell'),
   { sortie: { type: 'proposition' } },
   { sortie: { verdict: 'ok', note: 'Plan sûr.' } },
   ecrire(`${RACINE_PROJET}/src/export.js`, 'export const exporter = () => "pdf";\n'),
@@ -110,6 +111,9 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     assert.match(export_ ?? '', /exporter/);
     assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/piege.js`), null, 'le reviewer n’a rien écrit');
     assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/cadreur.js`), null, 'le cadreur n’a rien écrit hors spec et plan');
+    // Le cadreur travaille sur la copie de contrôle : même une écriture par le shell n'atteint pas la branche.
+    assert.equal(await lireFichierVolume(docker, image, nomRessource(T), `${RACINE_PROJET}/src/cadreur-shell.js`), null, 'le shell du cadreur n’atteint pas la branche');
+    assert.equal(await lireFichierVolume(docker, image, nomRessource(T), '/workspace/cadrage/spec.md'), null, 'spec.md écrit dans la copie, pas dans l’espace de la branche');
 
     const journal = lireJournal(o.db, T);
     assert.ok(journal.some(e => e.type === 'decision' && e.commande.includes('src/piege.js') && e.decision === 'Refusé' && e.decideur === 'Liste noire' && e.raison.includes('agent en lecture seule : Write et Edit retirés')));
