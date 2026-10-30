@@ -1,6 +1,6 @@
 import type Docker from 'dockerode';
 import {
-  creerConteneurAnalyse, LABEL_TACHE, lireFichierVolume, nomRessource, preparerReseau, supprimerReseau, verifierImage,
+  creerConteneurAnalyse, LABEL_TACHE, lireFichierVolume, nomRessource, PLAFOND_ANALYSE, preparerReseau, supprimerReseau, verifierImage,
 } from '../conteneurs/docker.ts';
 import { envSortie, type DepsExecution } from '../conteneurs/execution.ts';
 import { AnomalieIntegrite } from '../integrite/anomalie.ts';
@@ -87,12 +87,13 @@ export async function executerAnalyse(deps: DepsExecution, tacheId: string, volu
     // Une fin d'attente due à un arrêt global ressemble à une fin normale : rien n'est relu pour une tâche arrêtée.
     verifierStatut();
 
-    // lireFichierVolume monte le volume lu sur /workspace : les mesures y sont à la racine.
+    // lireFichierVolume monte le volume lu sur /workspace : les mesures y sont à la racine. Au-delà du plafond
+    // d'analyse, un fichier est illisible (null), donc sa mesure absente : jamais de diff ni de Cobertura tronqué.
     const lectures: [string, string, string][] = [
       ...FICHIERS_MESURES.map((f): [string, string, string] => [f, mesures, `/workspace/${f}`]),
       ...FICHIERS_TESTS.map((f): [string, string, string] => [f, volume, `/workspace/analyse/${f}`]),
     ];
-    const lus = await parLots(lectures, LECTURES_SIMULTANEES, ([, v, chemin]) => lireFichierVolume(deps.docker, imageId, v, chemin));
+    const lus = await parLots(lectures, LECTURES_SIMULTANEES, ([, v, chemin]) => lireFichierVolume(deps.docker, imageId, v, chemin, PLAFOND_ANALYSE));
     lectures.forEach(([f], i) => { fichiers[f] = lus[i]; });
   } catch (e) {
     erreur = e;

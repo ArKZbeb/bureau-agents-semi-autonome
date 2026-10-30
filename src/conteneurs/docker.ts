@@ -146,13 +146,24 @@ export async function lireShaVolume(docker: Docker, imageId: string, volume: str
   return r.code === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
 }
 
-// Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, plafonne à 5 Mo.
-const commandeLecture = (chemin: string) => ['sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c 5242880 -- "$p"', 'lecture', chemin];
+/** Plafond des lectures ordinaires (transcripts, documents du cadreur). */
+export const PLAFOND_LECTURE = 5 * 1024 ** 2;
+/** Plafond des fichiers d'analyse (diff.patch, Cobertura, rapports) : un fichier tronqué fausserait les mesures. */
+export const PLAFOND_ANALYSE = 64 * 1024 ** 2;
 
-export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string): Promise<string | null> {
+// Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, lit au plus plafond + 1 octets.
+const commandeLecture = (chemin: string, plafond: number) => [
+  'sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c "$2" -- "$p"',
+  'lecture', chemin, String(plafond + 1),
+];
+// Au-delà du plafond, le fichier n'est pas lu (null) : jamais un contenu tronqué présenté comme complet.
+const contenuLu = (code: number, sortie: Buffer, plafond: number): string | null =>
+  code === 0 && sortie.length <= plafond ? sortie.toString('utf8') : null;
+
+export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string, plafond = PLAFOND_LECTURE): Promise<string | null> {
   if (!cheminConfine(chemin)) return null;
-  const r = await executerJetable(docker, imageId, commandeLecture(chemin), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
-  return r.code === 0 ? r.stdout.toString('utf8') : null;
+  const r = await executerJetable(docker, imageId, commandeLecture(chemin, plafond), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  return contenuLu(r.code, r.stdout, plafond);
 }
 
 // readlink -m : résout tous les liens, même si la cible finale n'existe pas encore (fichier à créer).
@@ -233,10 +244,10 @@ export async function lireFichierConteneur(conteneur: Docker.Container, chemin: 
   if (!cheminConfine(chemin)) return null;
   const morceaux: Buffer[] = [];
   const r = await Promise.race([
-    executerDans(conteneur, commandeLecture(chemin), m => morceaux.push(m)),
+    executerDans(conteneur, commandeLecture(chemin, PLAFOND_LECTURE), m => morceaux.push(m)),
     new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
   ]);
-  return r && r.code === 0 ? Buffer.concat(morceaux).toString('utf8') : null;
+  return r ? contenuLu(r.code, Buffer.concat(morceaux), PLAFOND_LECTURE) : null;
 }
 
 export async function resoudreCheminConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {

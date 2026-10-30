@@ -14,6 +14,7 @@ import { Jetons } from '../../src/reseau/jetons.ts';
 import { creerTache } from '../../src/taches/depot.ts';
 import { pauserPourArretGlobal } from '../../src/pipeline/actions.ts';
 import { executerAnalyse } from '../../src/analyse/execution.ts';
+import { PLAFOND_ANALYSE } from '../../src/conteneurs/docker.ts';
 import type { DepsExecution } from '../../src/conteneurs/execution.ts';
 
 const T = 'T-77';
@@ -182,4 +183,12 @@ test('échec du nettoyage seul : l’erreur remonte après le nettoyage complet'
   await assert.rejects(executerAnalyse(d, T, 'copie', BASE), /suppression du réseau impossible/);
   assert.equal(etat.volumesSupprimes.filter(v => v.endsWith('-mesures')).length, 2);
   assert.equal(d.jetons.valider(jetonDe(analyses(etat.crees)[0])), null, 'jeton révoqué');
+});
+
+test('fichiers d’analyse relus avec le plafond d’analyse (64 Mo), jamais tronqués à 5 Mo', async () => {
+  const { docker, etat } = fauxDocker();
+  await executerAnalyse(deps(docker), T, 'copie', BASE);
+  const lectures = etat.crees.filter(c => (c.Cmd as string[])[0] === 'sh');
+  assert.ok(lectures.length > 0);
+  for (const c of lectures) assert.equal((c.Cmd as string[]).at(-1), String(PLAFOND_ANALYSE + 1), JSON.stringify(c.Cmd));
 });

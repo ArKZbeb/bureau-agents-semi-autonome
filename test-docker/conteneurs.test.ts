@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import Docker from 'dockerode';
 import { construireImage } from '../src/conteneurs/image.ts';
 import {
-  arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume,
+  arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume, PLAFOND_ANALYSE,
   resoudreCheminConteneur, resoudreCheminVolume,
   fichierParametresVides, lireShaVolume, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
@@ -121,6 +121,18 @@ test('copie de contrôle : branche committée seulement, modifications jetées',
   } finally {
     await supprimerCopieControle(docker, id).catch(() => {});
     await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
+  }
+});
+
+test('lecture plafonnée : fichier de 6 Mo refusé (null) au plafond ordinaire, lu entier au plafond d’analyse', async () => {
+  const volume = `bureau-lecture-${Date.now()}`;
+  await docker.createVolume({ Name: volume });
+  try {
+    await executerSurVolume(volume, 'head -c 6291456 /dev/zero | tr "\\0" a > /workspace/gros.patch');
+    assert.equal(await lireFichierVolume(docker, image, volume, '/workspace/gros.patch'), null, 'jamais tronqué à 5 Mo');
+    assert.equal((await lireFichierVolume(docker, image, volume, '/workspace/gros.patch', PLAFOND_ANALYSE))?.length, 6291456);
+  } finally {
+    await docker.getVolume(volume).remove({ force: true }).catch(() => {});
   }
 });
 
