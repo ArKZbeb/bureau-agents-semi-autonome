@@ -8,10 +8,11 @@ export const PLAFOND_BUNDLE = 48 * 1024 ** 2;
 
 const SHA = /^[0-9a-f]{40}$/;
 // Le dépôt du volume appartient à l'agent (config, attributs, refs/replace, grafts, shallow) : une seule commande l'interroge,
-// la lecture de la pointe. Tout le reste tourne dans un dépôt nu vierge de /tmp qui emprunte seulement ses objets.
+// la lecture de la pointe. Le commit-graph, le multi-pack-index et les bitmaps du volume (lus via alternates) sont désactivés : ils permettent de
+// faire dire à git un autre arbre que celui du commit. Tout le reste tourne dans un dépôt nu vierge de /tmp qui emprunte seulement ses objets.
 const ENV = 'export HOME=/tmp GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_NO_REPLACE_OBJECTS=1 GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0';
 const GIT_VOLUME = `git -c safe.directory='*' --git-dir=${RACINE_PROJET}/.git`;
-const PROPRE = `-c core.attributesFile=/dev/null -c attr.tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904 -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.bigFileThreshold=512m -c core.quotePath=false`;
+const PROPRE = `-c core.attributesFile=/dev/null -c attr.tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904 -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.bigFileThreshold=512m -c core.quotePath=false -c core.commitGraph=false -c core.multiPackIndex=false -c pack.useBitmaps=false`;
 const DIFF = `--no-ext-diff --no-textconv --no-color --text -M --src-prefix=a/ --dst-prefix=b/`;
 // $1 base, $2 sha, $3 réf lue dans le volume (HEAD ou refs/heads/…), $4 nom de la réf dans le dépôt vierge : la pointe doit être sha, base doit exister.
 const PREPARATION = [
@@ -103,7 +104,7 @@ export async function lireBundle(docker: Docker, imageId: string, volume: string
   // Pointe, dépôt vierge et bundle dans le même conteneur : aucune fenêtre entre la vérification et la fabrication.
   const script = `${PREPARATION}
 git -C /tmp/r ${PROPRE} bundle create /tmp/b.bundle "$1..refs/heads/$4" 2>/dev/null || exit 16
-[ "$(git bundle list-heads /tmp/b.bundle)" = "$2 refs/heads/$4" ] || exit 17
+[ "$(git -C /tmp/r bundle list-heads /tmp/b.bundle)" = "$2 refs/heads/$4" ] || exit 17
 [ "$(stat -c %s /tmp/b.bundle)" -le ${PLAFOND_BUNDLE} ] || exit 18
 base64 -w0 /tmp/b.bundle`;
   const r = await lancer(docker, imageId, volume, script, [base, sha, `refs/heads/${branche}`, branche]);
