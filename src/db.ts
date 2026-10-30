@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS taches (
   etape TEXT NOT NULL, statut TEXT NOT NULL, raison TEXT,
   echanges_plan INTEGER NOT NULL DEFAULT 0, essais_qa INTEGER NOT NULL DEFAULT 0,
   budget_usd REAL NOT NULL, depense_usd REAL NOT NULL DEFAULT 0,
-  reprise TEXT, agent TEXT, maj_le TEXT NOT NULL
+  reprise TEXT, agent TEXT, commit_base TEXT, maj_le TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS artefacts (
   id INTEGER PRIMARY KEY, tache_id TEXT NOT NULL, type TEXT NOT NULL, contenu TEXT NOT NULL,
@@ -55,6 +55,7 @@ export function ouvrirBase(chemin: string): Base {
   // Bases créées avant la phase 2 : la colonne de l'agent courant est ajoutée sans perte.
   const colonnes = (db.prepare('PRAGMA table_info(taches)').all() as { name: string }[]).map(c => c.name);
   if (!colonnes.includes('agent')) db.exec('ALTER TABLE taches ADD COLUMN agent TEXT');
+  if (!colonnes.includes('commit_base')) db.exec('ALTER TABLE taches ADD COLUMN commit_base TEXT');
   return db;
 }
 

@@ -138,6 +138,14 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
 }
 
 const cheminConfine = (chemin: string) => path.posix.normalize(chemin).startsWith('/workspace/');
+// SHA de HEAD du dépôt d'un volume, lu en lecture seule ; HOME=/tmp et safe.directory évitent toute dépendance à la configuration du dépôt.
+export async function lireShaVolume(docker: Docker, imageId: string, volume: string): Promise<string | null> {
+  const script = `export HOME=/tmp && git config --global --add safe.directory '*' && git -C ${RACINE_PROJET} rev-parse HEAD`;
+  const r = await executerJetable(docker, imageId, ['sh', '-c', script], [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  const sha = r.stdout.toString('utf8').trim();
+  return r.code === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+}
+
 // Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, plafonne à 5 Mo.
 const commandeLecture = (chemin: string) => ['sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c 5242880 -- "$p"', 'lecture', chemin];
 

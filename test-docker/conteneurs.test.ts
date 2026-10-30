@@ -9,7 +9,7 @@ import { construireImage } from '../src/conteneurs/image.ts';
 import {
   arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume,
   resoudreCheminConteneur, resoudreCheminVolume,
-  fichierParametresVides, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
+  fichierParametresVides, lireShaVolume, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
 
 const docker = new Docker();
@@ -278,5 +278,17 @@ test('mesures hors de portée du code testé : un test hostile ne réécrit rien
   } finally {
     await docker.getVolume(copie).remove({ force: true }).catch(() => {});
     await docker.getVolume(mesures).remove({ force: true }).catch(() => {});
+  }
+});
+
+test('SHA lu dans le volume d’une tâche', async () => {
+  const id = `T-${Date.now() % 100000}`;
+  await preparerEspace(docker, image, id, depot);
+  try {
+    const sha = await lireShaVolume(docker, image, nomRessource(id));
+    assert.match(sha ?? '', /^[0-9a-f]{40}$/);
+    assert.equal(sha, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: depot }).toString().trim());
+  } finally {
+    await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
   }
 });

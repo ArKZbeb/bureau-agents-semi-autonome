@@ -7,7 +7,7 @@ import type http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config.ts';
 import {
-  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireFichierVolume, nomCopie, nomRessource, preparerCopieControle, preparerEspace,
+  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireShaVolume, lireFichierVolume, nomCopie, nomRessource, preparerCopieControle, preparerEspace,
   resoudreCheminConteneur, supprimerCopieControle, resoudreCheminVolume,
   verifierDocker, verifierImage,
 } from './conteneurs/docker.ts';
@@ -32,7 +32,7 @@ import { Jetons } from './reseau/jetons.ts';
 import { relayerApi } from './reseau/proxy-api.ts';
 import { creerServeurConteneurs } from './reseau/serveur-conteneurs.ts';
 import { creerServeurUi } from './reseau/serveur-ui.ts';
-import { appliquer, creerTache, listerTaches, lireTache, reprendreApresRedemarrage, type NouvelleTache, type Tache } from './taches/depot.ts';
+import { appliquer, creerTache, definirCommitBase, listerTaches, lireTache, reprendreApresRedemarrage, type NouvelleTache, type Tache } from './taches/depot.ts';
 import { listerEchanges, lireProposition } from './taches/echanges.ts';
 
 export type OptionsOrchestrateur = {
@@ -140,11 +140,22 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     if (t.id !== undefined && !/^T-\d+$/.test(t.id)) throw new Error(`identifiant de tâche invalide : ${t.id}`);
     const id = t.id ?? `T-${(db.prepare(`SELECT COALESCE(MAX(CAST(SUBSTR(id, 3) AS INTEGER)), 0) AS n FROM taches`).get() as { n: number }).n + 1}`;
     // L'espace est prêt avant que la tâche n'existe : l'ordonnanceur ne peut pas la lancer sur un volume vide.
-    try { await preparerEspace(docker, manifeste.image, id, t.cheminProjet); } catch (err) {
+    let base: string | null = null;
+    let volumeCree = false;
+    try {
+      await preparerEspace(docker, manifeste.image, id, t.cheminProjet);
+      volumeCree = true;
+      base = await lireShaVolume(docker, manifeste.image, nomRessource(id));
+      if (!base) throw new Error('commit de base illisible dans l’espace de la tâche');
+    } catch (err) {
+      // preparerEspace nettoie lui-même ses échecs (et ne doit jamais supprimer l'espace d'une tâche existante) ; seul le volume créé ici est retiré.
+      if (volumeCree) await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
       journaliser({ tacheId: id, type: 'evenement', commande: 'préparation impossible', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (err as Error).message.slice(0, 200) });
       throw err;
     }
-    const tache = creerTache(db, { ...t, id });
+    creerTache(db, { ...t, id });
+    definirCommitBase(db, id, base);
+    const tache = lireTache(db, id);
     enregistrerArtefact(db, cle, id, 'demande', t.demande);
     journaliser({ tacheId: id, type: 'evenement', commande: `git clone ${t.cheminProjet} ${id}`, couche: '—', decision: 'Autorisé', decideur: 'Orchestrateur', raison: 'préparation du conteneur' });
     return tache;

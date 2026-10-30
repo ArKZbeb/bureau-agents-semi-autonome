@@ -41,5 +41,6 @@ test('base existante sans colonne agent : colonne ajoutée à l’ouverture', ()
   const db = ouvrirBase(chemin);
   const colonnes = (db.prepare('PRAGMA table_info(taches)').all() as { name: string }[]).map(c => c.name);
   assert.ok(colonnes.includes('agent'));
+  assert.ok(colonnes.includes('commit_base'));
   db.close();
 });
