@@ -11,7 +11,7 @@ test('TRX : total et échecs', () => {
 test('npm audit : sévérités normalisées', () => {
   const json = JSON.stringify({ vulnerabilities: { 'csv-parsr': { name: 'csv-parsr', severity: 'critical', via: [] }, lodash: { name: 'lodash', severity: 'moderate', via: [] } } });
   assert.deepEqual(lireNpmAudit(json)!.map(c => [c.severite, c.message]), [['critique', 'csv-parsr : vulnérabilité critical'], ['moyenne', 'lodash : vulnérabilité moderate']]);
-  assert.equal(lireNpmAudit('{}')!.length, 0);
+  assert.equal(lireNpmAudit('{}'), null);
   assert.equal(lireNpmAudit('{'), null);
 });
 
@@ -89,4 +89,9 @@ test('gitleaks réel : règle et emplacement seulement', () => {
   assert.ok(constats.length > 0);
   assert.deepEqual(constats[0], { outil: 'gitleaks', severite: 'critique', message: 'secret détecté (aws-access-token)', fichier: 'config/aws.env:2' });
   assert.ok(Object.keys(constats[0]).every(k => ['outil', 'severite', 'message', 'fichier'].includes(k)));
+});
+
+test('Semgrep : erreurs d\'analyse = mesure incomplète', () => {
+  assert.equal(lireSemgrep('{"results":[],"errors":[{"code":3,"message":"Timeout"}]}'), null);
+  assert.deepEqual(lireSemgrep('{"results":[],"errors":[]}'), []);
 });

@@ -21,7 +21,7 @@ export function lireNpmAudit(texte: string): Constat[] | null {
   if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
   // Hors réseau, npm audit renvoie { message, error } : ce n'est pas une mesure, jamais « zéro constat ».
   if ('error' in j) return null;
-  const v = 'vulnerabilities' in j ? j.vulnerabilities : {};
+  const v = j.vulnerabilities;
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
   return Object.entries(v as Record<string, Json>).map(([nom, v]) => ({
     outil: 'audit_npm' as const, severite: severite(v?.severity), message: `${nom} : vulnérabilité ${v?.severity}`, fichier: null,
@@ -43,6 +43,8 @@ export function lireDotnetVulnerables(texte: string): Constat[] | null {
 export function lireSemgrep(texte: string): Constat[] | null {
   const j = json(texte);
   if (!j || !Array.isArray(j.results)) return null;
+  // Erreurs d'analyse (délais, règles en échec) : mesure incomplète, donc absente.
+  if (Array.isArray(j.errors) && j.errors.length > 0) return null;
   return (j.results as Json[]).map(r => ({
     outil: 'semgrep' as const, severite: severite(r.extra?.severity), message: `${String(r.check_id).replace(/^opt\.analyse\./, '')} : ${r.extra?.message ?? ''}`.trim(),
     fichier: r.path ? `${r.path}:${r.start?.line ?? '?'}` : null,
