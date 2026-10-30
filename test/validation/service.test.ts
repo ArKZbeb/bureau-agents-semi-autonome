@@ -64,7 +64,7 @@ function deps(db: Base, o: { pointe?: string; lecture?: LectureValidation | null
   const appels = { lire: [] as string[][], bundle: [] as string[][], supprimer: [] as string[] };
   const d: DepsValidation = {
     db, cle, executer: depot.executer,
-    lire: async (volume, base, sha) => { appels.lire.push([volume, base, sha]); return o.lecture === undefined ? lecture(o.pointe) : o.lecture; },
+    lire: async (volume, tacheId, base, sha) => { appels.lire.push([volume, tacheId, base, sha]); return o.lecture === undefined ? lecture(o.pointe) : o.lecture; },
     bundle: async (volume, tacheId, base, sha) => { appels.bundle.push([volume, tacheId, base, sha]); return o.bundle === undefined ? BUNDLE : o.bundle; },
     supprimerVolumes: async id => { appels.supprimer.push(id); },
   };
@@ -80,7 +80,7 @@ test('dossier : pointe = sha signé, intégrité vérifiée, lecture recopiée, 
   db.prepare(`INSERT INTO escalades (tache_id, outil, entree, empreinte_appel, raison, statut, cree_le) VALUES ('T-43', 'Bash', '{}', 'e', 'r', 'approuvee', 'now')`).run();
   const { d, appels } = deps(db);
   const dossier = await dossierValidation(d, 'T-43');
-  assert.deepEqual(appels.lire, [['bureau-t-43', B, S]]);
+  assert.deepEqual(appels.lire, [['bureau-t-43', 'T-43', B, S]]);
   assert.deepEqual(dossier, {
     branche: 'task/43', sha: S, commits: 2, fichiers: [{ fichier: 'src/devis.ts', ajouts: 12, suppressions: 3 }],
     diff: 'diff --git a/src/devis.ts b/src/devis.ts\n', tronque: false, integrite: { verifiee: true },

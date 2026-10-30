@@ -14,11 +14,12 @@ const ENV = 'export HOME=/tmp GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null 
 const GIT_VOLUME = `git -c safe.directory='*' --git-dir=${RACINE_PROJET}/.git`;
 const PROPRE = `-c core.attributesFile=/dev/null -c attr.tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904 -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.bigFileThreshold=512m -c core.quotePath=false -c core.commitGraph=false -c core.multiPackIndex=false -c pack.useBitmaps=false`;
 const DIFF = `--no-ext-diff --no-textconv --no-color --text -M --src-prefix=a/ --dst-prefix=b/`;
-// $1 base, $2 sha, $3 réf lue dans le volume (HEAD ou refs/heads/…), $4 nom de la réf dans le dépôt vierge : la pointe doit être sha, base doit exister.
-const PREPARATION = [
+// $1 base, $2 sha, $3 réf lue dans le volume (refs/heads/…), $4 nom de la réf dans le dépôt vierge : sha et base doivent exister.
+// Pour le bundle, la pointe doit être sha ; la lecture du dossier rapporte la pointe trouvée, que l'orchestrateur compare au sha signé.
+const preparation = (pointeExigee: boolean) => [
   ENV,
   `tip=$(${GIT_VOLUME} rev-parse --verify "$3^{commit}") || exit 11`,
-  `[ "$tip" = "$2" ] || exit 12`,
+  pointeExigee ? `[ "$tip" = "$2" ] || exit 12` : `${GIT_VOLUME} cat-file -e "$2^{commit}" || exit 12`,
   `${GIT_VOLUME} cat-file -e "$1^{commit}" || exit 13`,
   `git init -q --bare /tmp/r || exit 14`,
   `echo ${RACINE_PROJET}/.git/objects > /tmp/r/objects/info/alternates`,
@@ -35,10 +36,13 @@ async function lancer(docker: Docker, imageId: string, volume: string, script: s
   }
 }
 
-export async function lireValidation(docker: Docker, imageId: string, volume: string, base: string, sha: string): Promise<LectureValidation | null> {
+// Diff, numstat et nombre de commits portent sur base..sha (le commit signé) ; pointe est celle de la branche de la tâche dans le volume,
+// rapportée même si elle diffère de sha.
+export async function lireValidation(docker: Docker, imageId: string, volume: string, tacheId: string, base: string, sha: string): Promise<LectureValidation | null> {
   if (!SHA.test(base) || !SHA.test(sha)) return null;
+  const branche = brancheTache(tacheId);
   // Sortie : pointe, nombre de commits, taille de numstat, numstat, puis diff (coupé à PLAFOND_DIFF + 1 octets).
-  const script = `${PREPARATION}
+  const script = `${preparation(false)}
 cd /tmp/r
 git ${PROPRE} rev-list --count "$1..refs/heads/$4" > /tmp/c || exit 21
 git ${PROPRE} diff ${DIFF} --numstat -z "$1" "$2" > /tmp/n || exit 22
@@ -46,7 +50,7 @@ git ${PROPRE} diff ${DIFF} --numstat -z "$1" "$2" > /tmp/n || exit 22
 s=$(cat /tmp/s); [ "$s" = 0 ] || [ "$s" = 141 ] || exit 23
 printf '%s\n%s\n%s\n' "$tip" "$(cat /tmp/c)" "$(wc -c < /tmp/n)"
 cat /tmp/n /tmp/d`;
-  const r = await lancer(docker, imageId, volume, script, [base, sha, 'HEAD', 'validation']);
+  const r = await lancer(docker, imageId, volume, script, [base, sha, `refs/heads/${branche}`, 'validation']);
   if (!r || r.code !== 0) return null;
   const sortie = r.stdout;
   const entetes: string[] = [];
@@ -59,7 +63,7 @@ cat /tmp/n /tmp/d`;
   }
   const [pointe, commits, tailleStat] = entetes;
   const taille = Number(tailleStat);
-  if (pointe !== sha || !/^\d+$/.test(commits) || !Number.isInteger(taille) || debut + taille > sortie.length) return null;
+  if (!SHA.test(pointe) || !/^\d+$/.test(commits) || !Number.isInteger(taille) || debut + taille > sortie.length) return null;
   const brut = sortie.subarray(debut + taille);
   const tronque = brut.length > PLAFOND_DIFF;
   return {
@@ -102,7 +106,7 @@ export async function lireBundle(docker: Docker, imageId: string, volume: string
   if (!SHA.test(base) || !SHA.test(sha) || base === sha) return null;
   const branche = brancheTache(tacheId);
   // Pointe, dépôt vierge et bundle dans le même conteneur : aucune fenêtre entre la vérification et la fabrication.
-  const script = `${PREPARATION}
+  const script = `${preparation(true)}
 git -C /tmp/r ${PROPRE} bundle create /tmp/b.bundle "$1..refs/heads/$4" 2>/dev/null || exit 16
 [ "$(git -C /tmp/r bundle list-heads /tmp/b.bundle)" = "$2 refs/heads/$4" ] || exit 17
 [ "$(stat -c %s /tmp/b.bundle)" -le ${PLAFOND_BUNDLE} ] || exit 18

@@ -11,7 +11,7 @@ import { importerBranche, ouvrirPr, type Executer } from './depot-hote.ts';
 
 export type DepsValidation = {
   db: Base; cle: Buffer;
-  lire: (volume: string, base: string, sha: string) => Promise<LectureValidation | null>;
+  lire: (volume: string, tacheId: string, base: string, sha: string) => Promise<LectureValidation | null>;
   bundle: (volume: string, tacheId: string, base: string, sha: string) => Promise<Buffer | null>;
   executer: Executer;
   supprimerVolumes: (tacheId: string) => Promise<void>;
@@ -55,7 +55,7 @@ export async function dossierValidation(deps: DepsValidation, tacheId: string): 
     throw e;
   }
   if (!t.commitBase) throw new Error('commit de base inconnu : lecture de la branche impossible');
-  const lecture = await deps.lire(nomRessource(tacheId), t.commitBase, sha);
+  const lecture = await deps.lire(nomRessource(tacheId), tacheId, t.commitBase, sha);
   if (!lecture) throw new Error('lecture de la branche impossible');
 
   let integrite: DossierValidation['integrite'] = { verifiee: true };

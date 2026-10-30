@@ -172,7 +172,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
 
   const depsValidation: DepsValidation = {
     db, cle, executer: executerHote,
-    lire: (volume, base, sha) => lireValidation(docker, manifeste.image, volume, base, sha),
+    lire: (volume, tacheId, base, sha) => lireValidation(docker, manifeste.image, volume, tacheId, base, sha),
     bundle: (volume, tacheId, base, sha) => lireBundle(docker, manifeste.image, volume, tacheId, base, sha),
     supprimerVolumes: async tacheId => {
       for (const v of [nomRessource(tacheId), nomVolumeMesures(tacheId), nomCopie(tacheId)])

