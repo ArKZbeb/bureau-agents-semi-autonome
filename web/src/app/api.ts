@@ -22,14 +22,14 @@ export class ApiService {
   private post<T>(url: string, corps: unknown) { return this.appel(this.http.post<T>(url, corps, { headers: this.entetes })); }
 
   taches() { return this.get<Tache[]>('/api/taches'); }
-  tache(id: string) { return this.get<FicheTache>(`/api/taches/${id}`); }
+  tache(id: string) { return this.get<FicheTache>(`/api/taches/${encodeURIComponent(id)}`); }
   creerTache(t: { projet: string; titre: string; demande: string }) { return this.post<Tache>('/api/taches', t); }
-  action(id: string, nom: NomAction, corps: Record<string, unknown>) { return this.post<Tache>(`/api/taches/${id}/${nom}`, corps); }
+  action(id: string, nom: NomAction, corps: Record<string, unknown>) { return this.post<Tache>(`/api/taches/${encodeURIComponent(id)}/${nom}`, corps); }
   projets() { return this.get<Projet[]>('/api/projets'); }
   detecter(chemin: string) { return this.post<Detection>('/api/projets/detection', { chemin }); }
   relier(p: { nom: string; chemin: string; budgetUsd: number; couvertureLignes: number }) { return this.post<Projet>('/api/projets', p); }
   escalades() { return this.get<Escalade[]>('/api/escalades'); }
-  deciderEscalade(id: number, decision: 'approuver' | 'refuser', commentaire: string) { return this.post<unknown>(`/api/escalades/${id}`, { decision, commentaire }); }
+  deciderEscalade(id: number, decision: 'approuver' | 'refuser', commentaire: string) { return this.post<unknown>(`/api/escalades/${String(id)}`, { decision, commentaire }); }
   journal(tacheId?: string) { return this.get<EntreeJournal[]>(tacheId ? `/api/journal?tache=${encodeURIComponent(tacheId)}` : '/api/journal'); }
   integrite() { return this.get<IntegriteJournal>('/api/journal/integrite'); }
   etat() { return this.get<EtatGlobal>('/api/etat'); }

@@ -36,4 +36,26 @@ describe('EtatBureau', () => {
     expect(e.taches()).toEqual([{ id: 'T-41' }]);
     expect(e.erreur()).toBe('jeton de session requis');
   });
+
+  it('demarrer est idempotent : un seul intervalle', async () => {
+    const e = TestBed.inject(EtatBureau);
+    e.demarrer(); e.demarrer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.taches).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(api.taches).toHaveBeenCalledTimes(2);
+    e.arreter();
+  });
+
+  it('saute une interrogation tant que la précédente tourne', async () => {
+    let fin!: (v: unknown[]) => void;
+    api.taches.mockReturnValueOnce(new Promise((r) => (fin = r)));
+    const e = TestBed.inject(EtatBureau);
+    const premier = e.rafraichir();
+    await e.rafraichir();
+    expect(api.taches).toHaveBeenCalledTimes(1);
+    fin([{ id: 'T-1' }]);
+    await premier;
+    expect(e.taches()).toEqual([{ id: 'T-1' }]);
+  });
 });

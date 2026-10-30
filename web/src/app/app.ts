@@ -29,6 +29,7 @@ import { EtatBureau } from './etat';
         }
       </header>
       @if (etat.erreur(); as e) { <p class="alerte">Orchestrateur injoignable : {{ e }}</p> }
+      @if (echecAction(); as m) { <p class="alerte">{{ m }}</p> }
       <router-outlet />
       @if (confirmation() === 'arret') {
         <div class="voile"><section class="dialogue">
@@ -54,6 +55,15 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit() { if (this.jeton) this.etat.demarrer(); }
   ngOnDestroy() { this.etat.arreter(); }
-  protected async arret() { this.confirmation.set(null); await this.api.arretGlobal(); await this.etat.rafraichir(); }
-  protected async reprise() { this.confirmation.set(null); await this.api.repriseGlobale(); await this.etat.rafraichir(); }
+  protected readonly echecAction = signal<string | null>(null);
+
+  protected arret() { return this.globale(() => this.api.arretGlobal(), 'Arrêt global impossible'); }
+  protected reprise() { return this.globale(() => this.api.repriseGlobale(), 'Reprise globale impossible'); }
+
+  private async globale(appel: () => Promise<unknown>, prefixe: string) {
+    this.confirmation.set(null);
+    this.echecAction.set(null);
+    try { await appel(); } catch (e) { this.echecAction.set(`${prefixe} : ${(e as Error).message}`); }
+    await this.etat.rafraichir();
+  }
 }

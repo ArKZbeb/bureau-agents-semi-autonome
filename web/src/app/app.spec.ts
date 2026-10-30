@@ -52,4 +52,32 @@ describe('App', () => {
     await Promise.resolve();
     expect(api.arretGlobal).toHaveBeenCalledTimes(1);
   });
+
+  it('arrêt global qui échoue : le message est visible', async () => {
+    api.arretGlobal.mockRejectedValue(new Error('conteneurs injoignables'));
+    const el = creer('jeton');
+    bouton(el, 'Arrêt global').click();
+    TestBed.tick();
+    bouton(el, 'Tout arrêter').click();
+    await new Promise((r) => setTimeout(r));
+    TestBed.tick();
+    expect(el.querySelector('.alerte')?.textContent).toContain('Arrêt global impossible : conteneurs injoignables');
+    expect(etat.rafraichir).toHaveBeenCalled();
+  });
+
+  it('suspendu : Annuler n’appelle rien, Reprendre appelle une fois', async () => {
+    etat.etat.set({ ordonnanceur: 'suspendu' });
+    api.repriseGlobale.mockResolvedValue({});
+    const el = creer('jeton');
+    bouton(el, 'Tout reprendre').click();
+    TestBed.tick();
+    bouton(el, 'Annuler').click();
+    TestBed.tick();
+    expect(api.repriseGlobale).not.toHaveBeenCalled();
+    bouton(el, 'Tout reprendre').click();
+    TestBed.tick();
+    bouton(el, 'Reprendre').click();
+    await Promise.resolve();
+    expect(api.repriseGlobale).toHaveBeenCalledTimes(1);
+  });
 });

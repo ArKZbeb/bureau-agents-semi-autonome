@@ -12,18 +12,25 @@ export class EtatBureau {
   readonly etat = signal<EtatGlobal>({ ordonnanceur: 'actif' });
   readonly erreur = signal<string | null>(null);
 
+  private enCours = false;
+
   async rafraichir(): Promise<void> {
+    if (this.enCours) return;
+    this.enCours = true;
     try {
       const [taches, escalades, projets, etat] = await Promise.all([this.api.taches(), this.api.escalades(), this.api.projets(), this.api.etat()]);
       this.taches.set(taches); this.escalades.set(escalades); this.projets.set(projets); this.etat.set(etat);
       this.erreur.set(null);
     } catch (e) {
       this.erreur.set((e as Error).message);
+    } finally {
+      this.enCours = false;
     }
   }
   demarrer(): void {
+    if (this.minuteur !== undefined) return;
     void this.rafraichir();
     this.minuteur = setInterval(() => void this.rafraichir(), 3000);
   }
-  arreter(): void { clearInterval(this.minuteur); }
+  arreter(): void { clearInterval(this.minuteur); this.minuteur = undefined; }
 }
