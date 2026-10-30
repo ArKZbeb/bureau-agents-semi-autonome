@@ -96,7 +96,22 @@ test('fetch : hooks désactivés et objets vérifiés, sans force', async () => 
   await importerBranche(doublure, depot, bundle, 'task/41', sha);
   const fetch = appels.find((a) => a.includes('fetch'))!;
   assert.ok(fetch.includes('core.hooksPath=/dev/null') && fetch.includes('transfer.fsckObjects=true') && fetch.includes('--no-tags'));
+  assert.ok(fetch.includes('--no-recurse-submodules'));
   assert.ok(!fetch.some((a) => /force|^\+|^-f$/.test(a)));
+});
+
+test('executerHote : la clé API n’est pas transmise à git ni à gh', async () => {
+  const avant = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-secret';
+  try {
+    const r = await executerHote('env', [], { cwd: racine });
+    assert.equal(r.code, 0);
+    assert.ok(!r.stdout.includes('ANTHROPIC_API_KEY'), 'clé absente de l’environnement');
+    assert.ok(!r.stdout.includes('sk-ant-secret'));
+    assert.match(r.stdout, /^GIT_TERMINAL_PROMPT=0$/m);
+  } finally {
+    if (avant === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = avant;
+  }
 });
 
 test('branche ou sha invalides : refus avant tout appel', async () => {

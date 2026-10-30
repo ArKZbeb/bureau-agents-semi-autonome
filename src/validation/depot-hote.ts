@@ -5,8 +5,14 @@ import path from 'node:path';
 
 export type Executer = (commande: string, args: string[], o: { cwd: string }) => Promise<{ code: number; stdout: string; stderr: string }>;
 
+// git et gh (et les hooks de mon dépôt, comme pre-push) ne reçoivent pas la clé API de l'orchestrateur.
+function environnementHote(): NodeJS.ProcessEnv {
+  const { ANTHROPIC_API_KEY: _cle, ...env } = process.env;
+  return { ...env, GIT_TERMINAL_PROMPT: '0' };
+}
+
 export const executerHote: Executer = (commande, args, o) => new Promise((ok, ko) => {
-  execFile(commande, args, { cwd: o.cwd, timeout: 120_000, maxBuffer: 10 * 1024 ** 2, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
+  execFile(commande, args, { cwd: o.cwd, timeout: 120_000, maxBuffer: 10 * 1024 ** 2, env: environnementHote() }, (err, stdout, stderr) => {
     if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') return ko(err);
     ok({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr) });
   });
@@ -29,7 +35,7 @@ export async function importerBranche(executer: Executer, cheminDepot: string, b
     }
     const verif = await git('bundle', 'verify', fichier);
     if (verif.code !== 0) throw new Error(`bundle refusé par git : ${verif.stderr.slice(0, 300)}`);
-    const rec = await git('-c', 'core.hooksPath=/dev/null', '-c', 'transfer.fsckObjects=true', 'fetch', '--no-tags', '--no-write-fetch-head', fichier, `${ref}:${ref}`);
+    const rec = await git('-c', 'core.hooksPath=/dev/null', '-c', 'transfer.fsckObjects=true', 'fetch', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', fichier, `${ref}:${ref}`);
     if (rec.code !== 0) throw new Error(`récupération refusée par git : ${rec.stderr.slice(0, 300)}`);
     const lue = (await git('rev-parse', '--verify', '--quiet', ref)).stdout.trim();
     if (lue !== sha) {
