@@ -53,6 +53,19 @@ ARG GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f24
 RUN curl -fsSL -o /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
  && echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks && rm /tmp/gitleaks.tar.gz
+# Configuration gitleaks : celle de la version, vérifiée, privée de sa liste blanche globale de chemins (fichiers
+# gitleaks.toml, verrous npm, vendor/, images…), qu'un dépôt pourrait utiliser pour cacher un secret.
+ARG GITLEAKS_CONFIG_SHA256=e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf
+RUN mkdir -p /opt/analyse \
+ && curl -fsSL -o /tmp/gitleaks-defaut.toml "https://raw.githubusercontent.com/gitleaks/gitleaks/v${GITLEAKS_VERSION}/config/gitleaks.toml" \
+ && echo "${GITLEAKS_CONFIG_SHA256}  /tmp/gitleaks-defaut.toml" | sha256sum -c - \
+ && awk '/^\[allowlist\]$/ { globale = 1 } /^\[\[rules\]\]$/ { globale = 0 } \
+         globale && /^paths = \[$/ { saute = 1; next } saute { if ($0 ~ /^\]$/) saute = 0; next } { print }' \
+      /tmp/gitleaks-defaut.toml > /opt/analyse/gitleaks.toml \
+ && [ "$(grep -c '^\[\[rules\]\]$' /opt/analyse/gitleaks.toml)" = "$(grep -c '^\[\[rules\]\]$' /tmp/gitleaks-defaut.toml)" ] \
+ && ! sed -n '/^\[allowlist\]$/,/^\[\[rules\]\]$/p' /opt/analyse/gitleaks.toml | grep -q '^paths' \
+ && mkdir /tmp/vide && gitleaks dir /tmp/vide --no-banner --config /opt/analyse/gitleaks.toml --exit-code 1 \
+ && rm -rf /tmp/vide /tmp/gitleaks-defaut.toml
 
 # Règles Semgrep (licence non libre, jamais versionnées) : p/csharp et p/typescript récupérées à la construction,
 # vérifiées puis réunies. Le digest de l'image, dans le manifeste signé, fige les règles utilisées.
@@ -71,15 +84,16 @@ RUN set -e; for p in csharp typescript; do \
     rm -rf /tmp/sg /tmp/sg.json /tmp/vide.cs
 
 # Fichiers nommés un à un : une copie locale non versionnée des règles n'entre jamais dans l'image.
-COPY analyse/analyser.sh analyse/chromium-conteneur analyse/karma.conf.cjs /opt/analyse/
-RUN chmod 0555 /opt/analyse/analyser.sh /opt/analyse/chromium-conteneur \
- && chmod 0444 /opt/analyse/karma.conf.cjs /opt/analyse/semgrep-regles.yml /opt/analyse/semgrep-requirements.txt
+COPY analyse/mesurer.sh analyse/tester.sh analyse/chromium-conteneur analyse/karma.conf.cjs /opt/analyse/
+RUN chmod 0555 /opt/analyse/mesurer.sh /opt/analyse/tester.sh /opt/analyse/chromium-conteneur \
+ && chmod 0444 /opt/analyse/karma.conf.cjs /opt/analyse/semgrep-regles.yml /opt/analyse/semgrep-requirements.txt /opt/analyse/gitleaks.toml
 
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY hook-gardien.mjs /opt/hooks/hook-gardien.mjs
 COPY passerelle.mjs /opt/passerelle/passerelle.mjs
 
-RUN mkdir -p /workspace && chown node:node /workspace
+# /mesures : point de montage du volume des mesures (mesurer.sh), propre à l'orchestrateur.
+RUN mkdir -p /workspace /mesures && chown node:node /workspace /mesures
 ENV CLAUDE_CONFIG_DIR=/workspace/.etat-claude \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
     DISABLE_AUTOUPDATER=1 \

@@ -358,6 +358,46 @@ Quand un projet n'a aucune vulnérabilité, **`frameworks` est absent**. Quand i
   `analyser.sh` lance désormais gitleaks depuis `$HOME` (`/workspace/.analyse-home`, qui ne contient pas de
   `.gitleaksignore`) : `( cd "$HOME" && gitleaks git "$CLONE" … )`. Dans le test E9 du spike, gitleaks avait été
   lancé depuis `/tmp`, ce qui explique que l'effet n'avait pas été vu.
+- **E21 (Tasks 2 et 9, analyse en deux conteneurs).** Dans un seul conteneur, le code testé (`dotnet test`,
+  `ng test`, `karma.conf.js` ou MSBuild du dépôt) tourne sous le même uid que Semgrep, gitleaks, le diff et les
+  audits. Un processus laissé en arrière-plan pourrait alors réécrire leurs résultats ou préparer `$HOME`.
+  `analyser.sh` est donc remplacé par deux scripts, que la Task 9 lance dans deux conteneurs successifs :
+  - `/opt/analyse/mesurer.sh COMMIT_BASE`, lancé en premier, n'exécute **aucun** code du dépôt.
+    - La copie est montée en lecture seule sur `/workspace`.
+    - `HOME` et les caches sont sous `/tmp`.
+    - Les résultats vont dans `/mesures`, un volume propre à l'orchestrateur, jamais monté dans le conteneur de
+      tests. L'image crée `/mesures` et le donne à `node`.
+    - Il produit `sha`, `diff.patch`, `fichiers-modifies`, `semgrep`, `gitleaks` et `audit_npm`. `npm audit` lit
+      seulement `package-lock.json`, sans `npm ci` ni script.
+  - `/opt/analyse/tester.sh` tourne ensuite dans la copie en écriture et produit `tests_dotnet`, `audit_dotnet`,
+    `tests_angular` et les fichiers de couverture, dans `/workspace/analyse`. L'audit .NET reste dans ce conteneur,
+    car la restauration NuGet évalue le MSBuild du dépôt.
+  **Limite assumée :** le code testé peut falsifier les résultats de tests, la couverture et l'audit .NET. Les
+  contre-mesures sont ailleurs : le QA relance les tests, le reviewer lit le code, et les signes de triche sont
+  repérés. Semgrep, gitleaks, le diff et npm audit, eux, ne peuvent plus être falsifiés par ce code.
+  Le test Docker « mesures hors de portée du code testé » le vérifie : un projet hostile tente de réécrire
+  `/mesures/*` et `/workspace/analyse/semgrep.json`, et les empreintes de `/mesures` restent identiques.
+  Mesures également protégées des configurations du dépôt :
+  - `npm audit` impose `npm_config_registry=https://registry.npmjs.org/` et `npm_config_include=dev,optional,peer`
+    par variables d'environnement, qui priment sur le `.npmrc` du projet. Vérifié : avec un `.npmrc` qui détourne
+    le registre, l'erreur hors ligne cite toujours `registry.npmjs.org`.
+  - `dotnet list package --vulnerable` reçoit `--source https://api.nuget.org/v3/index.json`.
+  - Semgrep reçoit `--max-target-bytes 0` : il écartait les fichiers de plus de 1 Mo.
+  Choix des cibles : la solution ou le projet .NET, et l'`angular.json`, sont pris au niveau le moins profond. S'il
+  y en a plusieurs à ce niveau, l'outil vaut 3 (mesure manquante).
+- **E22 (Task 2, liste blanche globale de gitleaks).** La configuration par défaut de gitleaks 8.30.1 contient un
+  `[allowlist]` global dont les `paths` écartent notamment `gitleaks.toml`, `package-lock.json`, `yarn.lock`,
+  `node_modules/`, `vendor/`, les images, les polices et les PDF. Un dépôt peut donc y cacher un secret : vérifié,
+  `deploy/gitleaks.toml` n'est pas détecté avec `[extend] useDefault = true`.
+  L'image télécharge `config/gitleaks.toml` de la version (SHA-256
+  `e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf`) et retire seulement ces `paths` globaux.
+  Elle garde les `regexes`, les `stopwords` et les listes blanches propres à chaque règle. Le résultat est écrit
+  dans `/opt/analyse/gitleaks.toml`. La construction vérifie :
+  - que le nombre de règles est inchangé ;
+  - qu'il ne reste aucun `paths` global ;
+  - que gitleaks charge le fichier.
+  Contrepartie : davantage de faux positifs possibles dans les verrous et les fichiers binaires. Pour la Task 5, on
+  peut aussi signaler les fichiers de ces chemins ajoutés par la branche.
 
 ## 7. Points ouverts
 
