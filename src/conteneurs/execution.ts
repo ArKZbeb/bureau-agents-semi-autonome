@@ -46,14 +46,16 @@ function messageEscalade(db: Base, tacheId: string): string {
     : `J’ai refusé : ${appel}${e.commentaire ? ` (${e.commentaire})` : ''}. Ne le relance pas ; trouve une autre approche conforme au plan, ou arrête-toi en expliquant le blocage.`;
 }
 
+/** Sortie réseau par la passerelle seulement (conteneurs d'analyse : ni API ni gardien). */
+export function envSortie(jeton: string): string[] {
+  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
+  return [`HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle'];
+}
+
 // Aucun secret : ANTHROPIC_API_KEY porte le jeton de la tâche, que le proxy remplace par la vraie clé.
 export function envTache(jeton: string): string[] {
   const passerelle = `http://passerelle:${PORT_INTERNE_PASSERELLE}`;
-  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
-  return [
-    `ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`,
-    `HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle',
-  ];
+  return [`ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`, ...envSortie(jeton)];
 }
 
 export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: Agent, prompt: string, options: { volume?: string } = {}): Promise<ResultatEtape> {

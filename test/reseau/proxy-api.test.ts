@@ -31,7 +31,7 @@ function monterSur(urlAmont: string, budgetUsd = 6, db: Base = ouvrirBase(':memo
   };
   const appeler = (cle: string, stream = true) => appelerChemin('POST', '/v1/messages?beta=true', cle, stream);
   const fermer = async () => { serveur.close(); serveur.closeAllConnections(); };
-  return { db, jeton, budgets, traitements, appeler, appelerChemin, fermer, url: async () => { await prete; return url(); } };
+  return { db, jetons, jeton, budgets, traitements, appeler, appelerChemin, fermer, url: async () => { await prete; return url(); } };
 }
 
 async function monter(budgetUsd = 6) {
@@ -78,6 +78,14 @@ test('réponse JSON non streamée comptée aussi', async () => {
 test('jeton invalide : 401, rien n’est relayé', async () => {
   const m = await monter();
   const r = await m.appeler('sk-ant-vole');
+  assert.equal(r.status, 401);
+  assert.equal(m.api.requetes.length, 0);
+  await m.fermer();
+});
+
+test('jeton de portée « sortie » (analyse) : 401, rien n’est relayé', async () => {
+  const m = await monter();
+  const r = await m.appeler(m.jetons.creer('T-41', 60_000, 'sortie'));
   assert.equal(r.status, 401);
   assert.equal(m.api.requetes.length, 0);
   await m.fermer();

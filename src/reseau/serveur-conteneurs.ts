@@ -33,7 +33,8 @@ async function traiter(deps: DepsServeurConteneurs, req: http.IncomingMessage, r
     return repondreJson(res, 403, { erreur: 'proxy HTTP en clair interdit' });
   }
   if (req.method === 'POST' && url === '/gardien') {
-    const tacheId = deps.jetons.valider(req.headers.authorization?.replace(/^Bearer /, ''));
+    // Gardien réservé aux agents : un conteneur d'analyse n'a pas de hook et ne doit pas déclencher d'avis payants.
+    const tacheId = deps.jetons.valider(req.headers.authorization?.replace(/^Bearer /, ''), 'agent');
     if (!tacheId) return repondreJson(res, 401, { erreur: 'jeton de tâche invalide' });
     const entree = JSON.parse((await lireCorps(req, 2_000_000)).toString('utf8')) as EntreeHook;
     return repondreJson(res, 200, await deps.gardien(tacheId, entree));

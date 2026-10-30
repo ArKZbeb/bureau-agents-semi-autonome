@@ -24,7 +24,7 @@ async function monter() {
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
   const port = (serveur.address() as net.AddressInfo).port;
   const fermer = () => { serveur.close(); echo.close(); };
-  return { port, portEcho, jeton, appels, refus, api: () => apiAppelee, fermer };
+  return { port, portEcho, jetons, jeton, appels, refus, api: () => apiAppelee, fermer };
 }
 
 const connect = (port: number, cible: string, jeton?: string) => new Promise<{ statut: number; socket: net.Socket }>((ok, ko) => {
@@ -43,6 +43,19 @@ test('POST /gardien : jeton exigé, décision renvoyée', async () => {
   assert.equal((await avec.json()).hookSpecificOutput.permissionDecision, 'allow');
   assert.deepEqual(m.appels[0][0], 'T-41');
   assert.equal(m.appels[0][1].tool_use_id, 'toolu_1');
+  m.fermer();
+});
+
+test('jeton de portée « sortie » : /gardien refusé, tunnel accepté', async () => {
+  const m = await monter();
+  const sortie = m.jetons.creer('T-42', 60_000, 'sortie');
+  const corps = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git status' }, tool_use_id: 'toolu_2' });
+  const r = await fetch(`http://127.0.0.1:${m.port}/gardien`, { method: 'POST', body: corps, headers: { authorization: `Bearer ${sortie}` } });
+  assert.equal(r.status, 401);
+  assert.equal(m.appels.length, 0, 'aucun avis demandé pour un conteneur d’analyse');
+  const { statut, socket } = await connect(m.port, `127.0.0.1:${m.portEcho}`, sortie);
+  assert.equal(statut, 200);
+  socket.destroy();
   m.fermer();
 });
 
