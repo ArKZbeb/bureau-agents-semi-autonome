@@ -1,19 +1,21 @@
 import { Component, inject, signal } from '@angular/core';
 import { ApiService } from '../api';
 import { EtatBureau } from '../etat';
-import { heure } from '../libelles';
+import { commandeVisible } from '../commande-visible';
+import { LIBELLE_STATUT, heure } from '../libelles';
 import type { Escalade } from '../modeles';
 
 /** `entree` est le JSON de l'entrée de l'outil ; analysé avec prudence, affiché comme texte seulement. */
-function commandeDe(e: Escalade): { commande: string | null; brut: string } {
+function commandeDe(e: Escalade): { texte: string; suspecte: boolean } {
   if (e.outil === 'Bash') {
     try {
       const v: unknown = JSON.parse(e.entree);
       const c = typeof v === 'object' && v !== null ? (v as { command?: unknown }).command : undefined;
-      if (typeof c === 'string') return { commande: c, brut: e.entree };
+      if (typeof c === 'string') { const r = commandeVisible(c); return { ...r, texte: `$ ${r.texte}` }; }
     } catch { /* affichage brut */ }
   }
-  return { commande: null, brut: e.entree };
+  const r = commandeVisible(e.entree);
+  return { ...r, texte: `${e.outil} ${r.texte}` };
 }
 
 @Component({
@@ -27,12 +29,12 @@ function commandeDe(e: Escalade): { commande: string | null; brut: string } {
         <div class="bloc">
           <p><strong class="mono">{{ e.tacheId }}</strong> · Tâche en pause depuis {{ heure(e.creeLe) }}</p>
           @if (affichage(e); as a) {
-            @if (a.commande !== null) { <pre class="mono">$ {{ a.commande }}</pre> }
-            @else { <pre class="mono">{{ e.outil }} {{ a.brut }}</pre> }
+            <pre class="mono commande">{{ a.texte }}</pre>
+            @if (a.suspecte) { <p class="alerte">Caractères invisibles ou de contrôle présents dans la commande</p> }
           }
           <h3>Raison donnée par le gardien</h3>
           <p>{{ e.raison }}</p>
-          <input type="text" aria-label="Commentaire (facultatif)" placeholder="Commentaire (facultatif)" [value]="commentaires()[e.id] ?? ''" (input)="saisir(e.id, $any($event.target).value)" />
+          <input type="text" aria-label="Commentaire (facultatif)" placeholder="Commentaire (facultatif)" [value]="commentaire(e.id)" (input)="saisir(e.id, $any($event.target).value)" />
           <button class="principal" [disabled]="enCours().has(e.id)" (click)="decider(e, 'approuver')">Autoriser</button>
           <button class="danger" [disabled]="enCours().has(e.id)" (click)="decider(e, 'refuser')">Refuser</button>
         </div>
@@ -41,6 +43,8 @@ function commandeDe(e: Escalade): { commande: string | null; brut: string } {
       }
     </section>
   `,
+  // L'humain autorise ce qu'il voit : toute la commande reste à l'écran.
+  styles: `.commande { white-space: pre-wrap; overflow-wrap: anywhere; }`,
 })
 export class Securite {
   private readonly api = inject(ApiService);
@@ -52,6 +56,7 @@ export class Securite {
   protected readonly confirmation = signal<string | null>(null);
   protected readonly affichage = commandeDe;
 
+  protected commentaire(id: number): string { return this.commentaires()[id] ?? ''; }
   protected saisir(id: number, texte: string): void { this.commentaires.update(c => ({ ...c, [id]: texte })); }
 
   protected async decider(e: Escalade, decision: 'approuver' | 'refuser'): Promise<void> {
@@ -59,7 +64,7 @@ export class Securite {
     this.enCours.update(s => new Set(s).add(e.id)); this.message.set(null); this.confirmation.set(null);
     try {
       const t = await this.api.deciderEscalade(e.id, decision, this.commentaires()[e.id] ?? '');
-      this.confirmation.set(`Décision enregistrée : la tâche ${t.id} reprend (${t.statut}).`);
+      this.confirmation.set(`Décision enregistrée : la tâche ${t.id} reprend (${LIBELLE_STATUT[t.statut] ?? t.statut}).`);
       this.commentaires.update(c => { const { [e.id]: _, ...reste } = c; return reste; });
       await this.etat.rafraichir();
     } catch (err) {

@@ -1,9 +1,13 @@
-import type { Etape, Tache } from './modeles';
+import type { Etape, Statut, Tache } from './modeles';
 
 export const ETAPES: Etape[] = ['cadrage', 'patron_plan', 'implementation', 'review', 'patron_code', 'qa', 'validation'];
 export const LIBELLE_ETAPE: Record<Etape, string> = {
   cadrage: 'Cadrage', patron_plan: 'Patron (plan)', implementation: 'Implémentation', review: 'Review',
   patron_code: 'Patron (code)', qa: 'QA', validation: 'Validation',
+};
+export const LIBELLE_STATUT: Record<Statut, string> = {
+  prete: 'en file', en_cours: 'en cours', en_pause: 'en pause', bloquee: 'bloquée', attente_humain: 'en attente de toi',
+  terminee: 'terminée', abandonnee: 'abandonnée',
 };
 const AGENTS: Record<string, string> = { cadreur: 'Cadreur', patron: 'Patron', implementeur: 'Implémenteur', reviewer: 'Reviewer', qa: 'QA' };
 const AGENT_ETAPE: Record<Etape, string> = {

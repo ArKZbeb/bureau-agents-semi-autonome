@@ -1,5 +1,6 @@
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../api';
+import { commandeVisible } from '../commande-visible';
 import { heure } from '../libelles';
 import type { EntreeJournal, IntegriteJournal } from '../modeles';
 
@@ -34,7 +35,7 @@ const DECISIONS = ['Autorisé', 'Refusé', 'Escaladé'];
         <tbody>
           @for (e of affichees(); track e.id) {
             <tr>
-              <td class="mono">{{ heure(e.horodatage) }}</td><td class="mono">{{ e.tacheId }}</td><td class="mono">{{ e.commande }}</td>
+              <td class="mono">{{ heure(e.horodatage) }}</td><td class="mono">{{ e.tacheId }}</td><td class="mono commande">{{ visible(e.commande) }}</td>
               <td>{{ e.couche }}</td><td>{{ e.decision }}</td><td>{{ e.decideur }}</td><td>{{ e.raison }}</td>
             </tr>
           }
@@ -42,11 +43,13 @@ const DECISIONS = ['Autorisé', 'Refusé', 'Escaladé'];
       </table>
     </section>
   `,
+  styles: `.commande { white-space: pre-wrap; overflow-wrap: anywhere; }`,
 })
 export class Journal implements OnDestroy {
   private readonly api = inject(ApiService);
   private readonly minuteur: ReturnType<typeof setInterval>;
   protected readonly heure = heure;
+  protected readonly visible = (commande: string) => commandeVisible(commande).texte;
   protected readonly max = MAX;
   protected readonly decisions = DECISIONS;
   protected readonly entrees = signal<EntreeJournal[]>([]);

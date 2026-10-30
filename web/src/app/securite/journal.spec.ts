@@ -99,4 +99,12 @@ describe('Journal', () => {
     expect(lignes()).toHaveLength(1);
     expect(lignes()[0]).toContain('cmd 1');
   });
+
+  it('commande : caractères invisibles rendus visibles, retour à la ligne', async () => {
+    const { el } = await ouvrir([entree(1, { commande: `rm${String.fromCharCode(0x202e)} -rf${' '.repeat(200)}/` })]);
+    const cellule = [...el.querySelectorAll('td')].find(td => td.textContent!.startsWith('rm'))!;
+    expect(cellule.textContent).toBe(`rm⟦U+202E⟧ -rf${' '.repeat(200)}/`);
+    expect(getComputedStyle(cellule).whiteSpace).toBe('pre-wrap');
+    expect(getComputedStyle(cellule).overflowWrap).toBe('anywhere');
+  });
 });
