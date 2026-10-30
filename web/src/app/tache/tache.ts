@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../api';
 import { LIBELLE_ETAPE, budget, eur, essai, qui } from '../libelles';
@@ -26,10 +26,12 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
         <p class="doux mono">{{ f.tache.id }} · {{ f.tache.projet }}</p>
         <h1>{{ f.tache.titre }}</h1>
         <p class="doux">{{ etape(f.tache) }} · {{ qui(f.tache) }} @if (essai(f.tache)) { · {{ essai(f.tache) }} } · {{ budget(f.tache) }}</p>
-        @if (erreur() ?? erreurChargement(); as e) { <p class="alerte">{{ e }}</p> }
+        @if (erreurChargement(); as e) { <p class="alerte">{{ e }}</p> }
+        @if (erreur(); as e) { <p class="alerte">{{ e }}</p> }
         @if (f.anomalie; as a) {
-          <p class="alerte anomalie">Anomalie d'intégrité : {{ a }}</p>
-        } @else {
+          <p class="alerte anomalie">Anomalie d'intégrité : {{ a }} <button (click)="recharger()">Recharger</button></p>
+        }
+        @if (true) {
           @switch (bloc()) {
             @case ('questions') {
               <div class="bloc">
@@ -91,10 +93,13 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
           </nav>
           @switch (onglet()) {
             @case ('documents') {
+              @if (f.anomalie) { <p class="doux">Documents indisponibles : anomalie d'intégrité</p> }
               @for (d of documents(); track d.type) { <h3>{{ d.titre }}</h3><pre>{{ d.texte }}</pre> }
             }
             @case ('rapport') {
+              @if (f.anomalie) { <p class="doux">Documents indisponibles : anomalie d'intégrité</p> } @else {
               <app-rapport [donnees]="{ analyse: f.documents?.analyse ?? null, verdict: f.documents?.verdict ?? null, rapport: f.documents?.rapport ?? null }" />
+              }
             }
             @case ('activite') {
               <ul class="activite">
@@ -163,18 +168,28 @@ export class TacheVue implements OnDestroy {
   protected readonly journalTrie = computed(() => [...this.journal()].sort((a, b) => b.id - a.id));
 
   constructor() {
-    effect(() => { this.id(); void this.charger(); });
+    effect(() => {
+      this.id();
+      untracked(() => {
+        this.fiche.set(null); this.journal.set([]); this.reponse.set(''); this.erreur.set(null); this.erreurChargement.set(null);
+        void this.charger(true);
+      });
+    });
     this.minuteur = setInterval(() => void this.charger(), 3000);
   }
   ngOnDestroy() { clearInterval(this.minuteur); this.minuteur = undefined; }
 
-  private async charger(): Promise<void> {
+  protected recharger() { return this.charger(true); }
+
+  /** Sans `forcer`, une fiche en anomalie n'est plus relue : chaque lecture ajoute une entrée signée au journal. */
+  private async charger(forcer = false): Promise<void> {
     if (this.enCours) { this.relance = true; return; }
     this.enCours = true;
     const id = this.id();
     try {
-      const [fiche, journal] = await Promise.all([this.api.tache(id), this.api.journal(id)]);
-      if (id === this.id()) { this.fiche.set(fiche); this.journal.set(journal); this.erreurChargement.set(null); }
+      const figee = !forcer && this.fiche()?.anomalie !== undefined;
+      const [fiche, journal] = await Promise.all([figee ? Promise.resolve(null) : this.api.tache(id), this.api.journal(id)]);
+      if (id === this.id()) { if (fiche) this.fiche.set(fiche); this.journal.set(journal); this.erreurChargement.set(null); }
     } catch (e) {
       this.erreurChargement.set((e as Error).message);
     } finally {
@@ -193,7 +208,7 @@ export class TacheVue implements OnDestroy {
     } finally {
       this.envoi.set(false);
     }
-    await this.charger();
+    await this.charger(true);
   }
   protected async envoyerReponse() {
     await this.agir('reponse', { texte: this.reponse().trim() });

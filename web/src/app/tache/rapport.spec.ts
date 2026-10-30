@@ -102,4 +102,16 @@ describe('RapportVue', () => {
     expect(el.querySelector('img')).toBeNull();
     expect(texte).toContain('<img src=x onerror=alert(1)>');
   });
+
+  it('éléments imbriqués invalides : Document illisible, sans exception', async () => {
+    const a = await rendre({ analyse: '{"outils":{},"constats":[null],"signalements":[],"tests":null,"couverture":null}' });
+    expect(a.texte).toContain('Document illisible');
+    const v = await rendre({ verdict: '{"qa":{"verdict":"go","criteres":[null]},"regles":[],"verdict":"go"}' });
+    expect(v.texte).toContain('Document illisible');
+  });
+
+  it('tests null : mesure manquante', async () => {
+    const { texte } = await rendre({ analyse: analyse({ tests: null }) });
+    expect(texte).toContain('Tests : mesure manquante');
+  });
 });

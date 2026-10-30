@@ -15,12 +15,19 @@ function lire<T>(texte: string | null): Lu<T> {
 }
 const objet = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const liste = (v: unknown): v is unknown[] => Array.isArray(v);
+const chaines = (v: unknown) => liste(v) && v.every(x => typeof x === 'string');
+const nombre = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 function analyseValide(v: unknown): v is Analyse {
-  return objet(v) && objet(v['outils']) && liste(v['constats']) && liste(v['signalements'])
-    && (v['tests'] === null || objet(v['tests'])) && (v['couverture'] === null || (objet(v['couverture']) && liste(v['couverture']['sourcesHorsCouverture'])));
+  return objet(v) && objet(v['outils']) && Object.values(v['outils']).every(s => typeof s === 'string')
+    && liste(v['constats']) && v['constats'].every(c => objet(c) && typeof c['severite'] === 'string' && typeof c['message'] === 'string' && (c['fichier'] === null || typeof c['fichier'] === 'string'))
+    && chaines(v['signalements'])
+    && (v['tests'] === null || (objet(v['tests']) && nombre(v['tests']['total']) && nombre(v['tests']['echecs'])))
+    && (v['couverture'] === null || (objet(v['couverture']) && nombre(v['couverture']['couvertes']) && nombre(v['couverture']['total'])
+      && (v['couverture']['pourcentage'] === null || nombre(v['couverture']['pourcentage'])) && chaines(v['couverture']['sourcesHorsCouverture'])));
 }
 function verdictValide(v: unknown): v is Verdict {
-  return objet(v) && (v['verdict'] === 'go' || v['verdict'] === 'no_go') && liste(v['regles']) && objet(v['qa']) && liste(v['qa']['criteres']);
+  return objet(v) && (v['verdict'] === 'go' || v['verdict'] === 'no_go') && chaines(v['regles']) && objet(v['qa']) && liste(v['qa']['criteres'])
+    && v['qa']['criteres'].every(c => objet(c) && nombre(c['numero']) && typeof c['rempli'] === 'boolean' && typeof c['preuve'] === 'string');
 }
 
 @Component({
@@ -38,7 +45,7 @@ function verdictValide(v: unknown): v is Verdict {
           <table>
             @for (o of outils(); track o.cle) { <tr><td>{{ o.nom }}</td><td>{{ o.statut }}</td></tr> }
           </table>
-          @if (a.tests; as t) { <p>Tests : {{ t.total - t.echecs }} / {{ t.total }} verts</p> }
+          @if (a.tests; as t) { <p>Tests : {{ t.total - t.echecs }} / {{ t.total }} verts</p> } @else { <p>Tests : mesure manquante</p> }
           @if (a.couverture; as c) {
             @if (c.pourcentage !== null) {
               <p>Couverture des lignes modifiées : {{ c.pourcentage }} % ({{ c.couvertes }} / {{ c.total }})</p>

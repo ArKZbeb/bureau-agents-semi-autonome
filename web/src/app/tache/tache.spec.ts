@@ -90,6 +90,7 @@ describe('TacheVue', () => {
     bouton("Garder l'approche du cadreur")!.click();
     await attendre();
     expect(api.action).toHaveBeenLastCalledWith('T-41', 'arbitrage', { choix: 'cadreur' });
+    expect(api.tache.mock.calls.length).toBeGreaterThan(1);
     bouton("Adopter l'alternative")!.click();
     await attendre();
     expect(api.action).toHaveBeenLastCalledWith('T-41', 'arbitrage', { choix: 'alternative' });
@@ -140,11 +141,51 @@ describe('TacheVue', () => {
     expect(el.querySelector('.alerte')!.textContent).toContain('la tâche n’attend pas cette action');
   });
 
-  it('une fiche avec anomalie : bandeau et aucun document', async () => {
-    const { el, texte } = await ouvrir({ tache: tache({ etape: 'implementation', statut: 'en_cours' }), anomalie: 'spec.md modifiée' });
+  it('une fiche avec anomalie : bandeau, onglets conservés, aucun document', async () => {
+    const { el, bouton, attendre, texte } = await ouvrir({ tache: tache({ etape: 'implementation', statut: 'en_cours' }), anomalie: 'spec.md modifiée' });
     expect(texte()).toContain("Anomalie d'intégrité : spec.md modifiée");
     expect(el.querySelectorAll('pre').length).toBe(0);
-    expect(texte()).not.toContain('Documents');
+    expect(texte()).toContain('Documents indisponibles : anomalie d\'intégrité');
+    bouton('Rapport')!.click();
+    await attendre();
+    expect(texte()).toContain('Documents indisponibles : anomalie d\'intégrité');
+    expect(texte()).not.toContain('Rapport en construction');
+    api.journal.mockResolvedValue([entree(7, { commande: 'lecture des documents', decision: 'refuse' })]);
+    await vi.advanceTimersByTimeAsync(3000);
+    await attendre();
+    bouton('Activité')!.click();
+    await attendre();
+    expect(texte()).toContain('lecture des documents');
+  });
+
+  it('une fiche avec anomalie n’est plus relue par l’interrogation, seulement sur demande', async () => {
+    const { bouton, attendre } = await ouvrir({ tache: tache({ statut: 'en_cours' }), anomalie: 'spec.md modifiée' });
+    expect(api.tache).toHaveBeenCalledTimes(1);
+    const j = api.journal.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30000);
+    await attendre();
+    expect(api.tache).toHaveBeenCalledTimes(1);
+    expect(api.journal.mock.calls.length).toBeGreaterThan(j);
+    bouton('Recharger')!.click();
+    await attendre();
+    expect(api.tache).toHaveBeenCalledTimes(2);
+  });
+
+  it('une tâche en cours n’affiche aucun bouton d’action', async () => {
+    const { el } = await ouvrir(fiche({ etape: 'implementation', statut: 'en_cours' }));
+    const textes = [...el.querySelectorAll('button')].map(b => b.textContent!.trim());
+    expect(textes).toEqual(['Documents', 'Rapport', 'Activité']);
+  });
+
+  it('l’erreur d’une action est effacée par l’action suivante réussie, sans masquer l’erreur de chargement', async () => {
+    api.action.mockRejectedValueOnce(new Error('refus'));
+    const { el, bouton, attendre } = await ouvrir(fiche({ etape: 'implementation', statut: 'en_pause', raison: 'erreur_api : 529' }));
+    bouton('Reprendre')!.click();
+    await attendre();
+    expect(el.textContent).toContain('refus');
+    bouton('Reprendre')!.click();
+    await attendre();
+    expect(el.textContent).not.toContain('refus');
   });
 
   it('une spec contenant <script> est rendue en texte', async () => {
