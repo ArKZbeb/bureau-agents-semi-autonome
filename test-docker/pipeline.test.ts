@@ -201,6 +201,8 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     assert.equal(lireArtefact(o.db, cle, tacheApi, 'demande')?.contenu, 'Exporter en CSV');
 
     // L'ordonnanceur est arrêté dans ce fichier : la tâche n'a jamais tourné ; elle est abandonnée, son espace retiré en fin de fichier.
+    // L'abandon n'est plus permis depuis « prête » : mise en pause d'abord.
+    appliquer(o.db, tacheApi, { type: 'pause', raison: 'arret_global', detail: 'nettoyage' });
     appliquer(o.db, tacheApi, { type: 'abandon' });
   });
 });

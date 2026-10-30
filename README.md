@@ -129,3 +129,5 @@ ANTHROPIC_API_KEY=... NODE_EXTRA_CA_CERTS=/chemin/vers/certificat-racine.pem npm
 Lancement : `npm run demarrer` affiche un lien `http://127.0.0.1:4310/#jeton=…` ; ouvre-le dans ton navigateur
 (le lien contient le jeton de session : ne le partage pas). Le panneau efface le jeton de la barre d'adresse
 et le garde pour la session de l'onglet.
+
+Fin de tâche : « Récupérer la branche » importe `task/<n>` dans le dépôt relié (bundle vérifié, sans hooks, jamais forcé) ; « Ouvrir une PR » lance `git push` et `gh pr create` sur l'hôte avec tes identifiants ; les volumes de la tâche sont ensuite supprimés. Avec un `BUREAU_DONNEES` temporaire, lance d'abord `npm run image` avec ce même dossier.

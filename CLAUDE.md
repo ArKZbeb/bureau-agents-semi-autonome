@@ -78,3 +78,5 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
   (`mesurer.sh` puis `tester.sh`) ; toute modification de `conteneur/analyse/` exige `npm run image`.
 - Panneau web : `npm --prefix web ci` (première fois), `npm run web:build` (à relancer après toute modification de `web/`), tests `npm run test:web`. Le front Angular 21 a son propre `package.json` (TypeScript 5.9) ; la racine reste en TypeScript 6.
 - Lancement : `ANTHROPIC_API_KEY=… npm run demarrer`, puis ouvrir le lien affiché (`http://127.0.0.1:4310/#jeton=…`) ; serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311.
+- Fin de tâche : récupérer la branche importe `task/<n>` dans le dépôt relié (bundle vérifié, sans hooks, jamais forcé) ; « Ouvrir une PR » lance `git push` et `gh pr create` sur l'hôte avec tes identifiants. Les volumes d'une tâche terminée ou abandonnée sont supprimés.
+- Un dossier de données temporaire (`BUREAU_DONNEES`) demande son propre `npm run image` (le manifeste signé y est écrit).
