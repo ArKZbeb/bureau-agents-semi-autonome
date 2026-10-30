@@ -143,4 +143,27 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     // La fausse API est en amont du proxy : la clé n'y arrive que ajoutée par le proxy, jamais fournie par un conteneur.
     assert.ok(api.requetes.length > 0 && api.requetes.every(r => r.cleApi === CLE_SECRETE), 'clé ajoutée par le proxy de l’orchestrateur');
   });
+
+  // Placé après le parcours : l'arrêt global ne doit pas le perturber (la tâche attend alors ma validation).
+  test('API du panneau : projet non relié, état global, intégrité du journal', async () => {
+    const appel = async (chemin: string, methode = 'GET', corps?: object) => {
+      const r = await fetch(`${o.urlUi}${chemin}`, {
+        method: methode, headers: { authorization: `Bearer ${o.jetonSession}`, 'content-type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined,
+      });
+      return { statut: r.status, corps: await r.json() as Record<string, unknown> };
+    };
+    const avant = (o.db.prepare('SELECT COUNT(*) AS n FROM taches').get() as { n: number }).n;
+    assert.deepEqual(await appel('/api/taches', 'POST', { projet: 'Inconnu', titre: 'x', demande: 'y' }), { statut: 409, corps: { erreur: 'projet non relié : Inconnu' } });
+    assert.equal((o.db.prepare('SELECT COUNT(*) AS n FROM taches').get() as { n: number }).n, avant, 'aucune tâche créée');
+
+    assert.deepEqual((await appel('/api/etat')).corps, { ordonnanceur: 'actif' });
+    await appel('/api/arret-global', 'POST');
+    assert.deepEqual((await appel('/api/etat')).corps, { ordonnanceur: 'suspendu' });
+    await appel('/api/reprise-globale', 'POST');
+    assert.deepEqual((await appel('/api/etat')).corps, { ordonnanceur: 'actif' });
+
+    const integrite = (await appel('/api/journal/integrite')).corps;
+    assert.equal(integrite.intacte, true);
+    assert.ok((integrite.entrees as number) > 0);
+  });
 });
