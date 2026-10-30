@@ -394,3 +394,69 @@ test('fichier devenu trop gros pendant l’évaluation d’une escalade : refus,
   assert.deepEqual(escalades, []);
   assert.equal(lireTache(db, 'T-45').statut, 'en_cours');
 });
+
+const TROP_LONG_AVIS = 'contenu trop long pour l’avis du gardien (> 20 000 caractères) : validation humaine';
+const escaladeEnAttente = (db: ReturnType<typeof monter>['db']) =>
+  db.prepare('SELECT id, raison, statut FROM escalades').all() as { id: number; raison: string; statut: string }[];
+
+test('script de plus de 20 000 caractères exécuté : escalade sans avis, puis autorisation à usage unique', async () => {
+  const script = '/workspace/projet/outils/long.sh';
+  const { db, deps, demandes, escalades } = monter({ avis: 'autoriser', fichiers: { [script]: 'echo ok\n'.repeat(2_501) } });
+  const e = bash('bash outils/long.sh');
+  const s = await decider(deps, 'T-45', e);
+  assert.equal(decision(s), 'defer');
+  assert.equal(s.hookSpecificOutput.permissionDecisionReason, `en attente de validation : ${TROP_LONG_AVIS}`);
+  assert.equal(demandes.length, 0, 'Haiku n’est pas consulté');
+  assert.deepEqual(escalades, ['T-45']);
+  assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
+  const [esc] = escaladeEnAttente(db);
+  assert.deepEqual([esc.raison, esc.statut], [TROP_LONG_AVIS, 'en_attente']);
+  deciderEscalade(db, cle, esc.id, 'approuver', 'lu en entier');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  assert.equal(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_1' })), 'allow');
+  assert.equal(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_2' })), 'defer', 'usage unique');
+  assert.equal(demandes.length, 0);
+});
+
+test('script long approuvé puis modifié au-delà des 20 000 premiers caractères : plus autorisé', async () => {
+  const script = '/workspace/projet/outils/long.sh';
+  const fichiers: Record<string, LectureControlee> = { [script]: 'echo ok\n'.repeat(2_501) };
+  const { db, deps } = monter({ avis: 'autoriser', fichiers });
+  const e = bash('bash outils/long.sh');
+  await decider(deps, 'T-45', e);
+  deciderEscalade(db, cle, escaladeEnAttente(db)[0].id, 'approuver', 'ok');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  fichiers[script] = `${'echo ok\n'.repeat(2_501)}echo fin modifiée\n`;
+  assert.notEqual(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_fin' })), 'allow');
+});
+
+test('package.json de plus de 20 000 caractères pour un script npm : escalade sans avis', async () => {
+  const pj = `{"scripts":{"test":"node t.js"},"description":"${'x'.repeat(20_000)}"}`;
+  const { db, deps, demandes } = monter({ avis: 'autoriser', fichiers: { '/workspace/projet/package.json': pj } });
+  const s = await decider(deps, 'T-45', bash('npm test'));
+  assert.equal(decision(s), 'defer');
+  assert.equal(demandes.length, 0);
+  assert.equal(escaladeEnAttente(db)[0].raison, TROP_LONG_AVIS);
+});
+
+test('fichier de dépendances illisible de plus de 20 000 caractères écrit : escalade sans avis', async () => {
+  const { db, deps, demandes } = monter({ avis: 'autoriser' });
+  const s = await decider(deps, 'T-45', ecrire('/workspace/projet/package.json', `{ illisible ${'x'.repeat(20_000)}`));
+  assert.equal(decision(s), 'defer');
+  assert.equal(demandes.length, 0);
+  assert.equal(escaladeEnAttente(db)[0].raison, TROP_LONG_AVIS);
+});
+
+test('contenus de 20 000 caractères au plus : avis consulté avec le contenu entier', async () => {
+  const script = '/workspace/projet/outils/pile.sh';
+  const contenu = 'echo ok\n'.repeat(2_500);
+  assert.equal(contenu.length, 20_000);
+  const { deps, demandes } = monter({ avis: 'autoriser', fichiers: { [script]: contenu } });
+  assert.equal(decision(await decider(deps, 'T-45', bash('bash outils/pile.sh'))), 'allow');
+  assert.equal(demandes.length, 1);
+  assert.equal(demandes[0].contenus[script], contenu);
+  const dep = monter({ avis: 'autoriser' });
+  const illisible = `{ ${'x'.repeat(19_998)}`;
+  assert.equal(decision(await decider(dep.deps, 'T-45', ecrire('/workspace/projet/package.json', illisible))), 'allow');
+  assert.equal(dep.demandes[0].contenus['/workspace/projet/package.json'], illisible);
+});

@@ -39,6 +39,7 @@ const OUTILS_ECRITURE = new Set(['Write', 'Edit']);
 // Droit d'écriture imposé hors de l'agent : le cadreur (spec et plan) et l'implémenteur gardent Write et Edit.
 export const AGENTS_ECRITURE = new Set(['implementeur', 'cadreur']);
 export const FICHIERS_CADRAGE = new Set(['/workspace/cadrage/spec.md', '/workspace/cadrage/plan.md']);
+/** Au-delà, un contenu n'est pas soumis à l'avis (Haiku jugerait sans voir la fin) : validation humaine. */
 const MAX_CONTENU = 20_000;
 const SCRIPTS_NPM = /\bnpm\s+(run|run-script|test|start)\b/;
 const SECRETS_MOTIF = /(^|[\/*])\.env|id_(rsa|ed25519|ecdsa|dsa)|\.ssh|\.aws|\.azure|\.git-credentials|\.netrc|\.(pem|pfx|p12|key)\b|secrets\.json/i;
@@ -209,12 +210,12 @@ async function evaluerAppelBash(deps: DepsGardien, ctx: Contexte, commande: stri
     if (tropGros(contenu)) return refusListe(TROP_VOLUMINEUX);
     const danger = evaluerContenu(chemin, contenu, true);
     if (danger) return depuis(danger);
-    contenus[chemin] = contenu.slice(0, MAX_CONTENU);
+    contenus[chemin] = contenu;
   }
   if (SCRIPTS_NPM.test(commande)) {
     const pj = await deps.lireFichier(ctx.tacheId, `${RACINE}/package.json`);
     if (tropGros(pj)) return refusListe(TROP_VOLUMINEUX);
-    if (pj) contenus[`${RACINE}/package.json`] = pj.slice(0, MAX_CONTENU);
+    if (pj) contenus[`${RACINE}/package.json`] = pj;
   }
   return avecAvis(deps, ctx, { outil: 'Bash', entree: { command: commande } }, v.raison, dependancesCommande(commande), contenus);
 }
@@ -242,7 +243,7 @@ async function evaluerEcriture(deps: DepsGardien, ctx: Contexte, outil: string, 
   if (danger) return depuis(danger);
   const nouvelles = dependancesFichier(chemin, avant, apres);
   const appel = { outil, entree: { file_path: chemin } };
-  if (nouvelles === null) return avecAvis(deps, ctx, appel, 'fichier de dépendances illisible', [], { [chemin]: apres.slice(0, MAX_CONTENU) });
+  if (nouvelles === null) return avecAvis(deps, ctx, appel, 'fichier de dépendances illisible', [], { [chemin]: apres });
   if (nouvelles.length) return avecAvis(deps, ctx, appel, `modification de ${path.posix.basename(chemin)}`, nouvelles, {});
   return depuis(v);
 }
@@ -251,6 +252,9 @@ async function avecAvis(deps: DepsGardien, ctx: Contexte, appel: DemandeAvis['ap
   const fiches = await Promise.all(dependances.map(d => deps.fiche(d)));
   const absente = fiches.find(f => f.existe === false);
   if (absente) return { decision: 'Refusé', decideur: 'Gardien', couche: '3', raison: `paquet introuvable sur ${absente.ecosysteme} : ${absente.nom}` };
+  // Jamais d'extrait soumis à l'avis : un contenu trop long passe en validation humaine (escalade, comme un doute de l'avis).
+  if (Object.values(contenus).some(c => c.length > MAX_CONTENU))
+    return { decision: 'Escaladé', decideur: 'Gardien', couche: '3', raison: 'contenu trop long pour l’avis du gardien (> 20 000 caractères) : validation humaine' };
   if (!enCours(deps, ctx.tacheId)) return enPause();
   const avis = await deps.avis({
     tache: { id: ctx.tacheId, titre: ctx.titre }, plan: ctx.plan, appel,
