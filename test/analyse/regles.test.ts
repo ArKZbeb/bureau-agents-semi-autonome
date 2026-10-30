@@ -75,3 +75,10 @@ test('pourcentage égal au seuil : go', () => {
   const a = analyse({ couverture: { couvertes: 8, total: 10, pourcentage: 80 } });
   assert.deepEqual(reglesQa(a, seuils, qaGo, ['c']), { verdict: 'go', declenchees: [] });
 });
+
+test('statut d’outil inconnu ou manquant : compté comme absent', () => {
+  const outils = { ...analyse().outils, semgrep: 'inconnu', gitleaks: undefined } as unknown as Analyse['outils'];
+  assert.deepEqual(reglesQa(analyse({ outils }), seuils, qaGo, ['c']), {
+    verdict: 'no_go', declenchees: ['outil non exécuté : Semgrep', 'outil non exécuté : gitleaks'],
+  });
+});

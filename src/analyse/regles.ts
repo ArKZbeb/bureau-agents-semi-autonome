@@ -3,12 +3,15 @@ import type { SortieQa } from '../agents/definitions.ts';
 import type { Seuils } from '../taches/seuils.ts';
 import { LIBELLES_OUTILS, OUTILS, type Analyse } from './analyse.ts';
 
+const MESURES = new Set<unknown>(['ok', 'echec', 'non_applicable']);
+
 // Règles automatiques de la spec : l'agent QA peut dire no-go, jamais faire passer une mesure manquante ou mauvaise.
 export function reglesQa(a: Analyse | null, seuils: Seuils, sortieQa: z.infer<typeof SortieQa>, criteres: string[]): { verdict: 'go' | 'no_go'; declenchees: string[] } {
   const d: string[] = [];
   if (!a) d.push('analyse absente : aucune mesure');
   else {
-    for (const o of [...OUTILS, 'couverture'] as const) if (a.outils[o] === 'absent') d.push(`outil non exécuté : ${LIBELLES_OUTILS[o]}`);
+    // Tout statut autre qu'une mesure (ok, echec) ou une non-applicabilité est une mesure manquante, même inattendu.
+    for (const o of [...OUTILS, 'couverture'] as const) if (!MESURES.has(a.outils[o])) d.push(`outil non exécuté : ${LIBELLES_OUTILS[o]}`);
     if (a.outils.tests_dotnet === 'echec') d.push(a.tests ? `tests en échec (${a.tests.echecs} sur ${a.tests.total})` : 'tests en échec');
     if (a.outils.tests_angular === 'echec') d.push('tests en échec (ng test)');
     for (const c of a.constats) if (c.severite === 'critique' || c.severite === 'haute') d.push(`faille ${c.severite} : ${c.message}${c.fichier ? ` (${c.fichier})` : ''}`);
