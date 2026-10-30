@@ -66,4 +66,31 @@ describe('DiffVue', () => {
     expect(texte()).toContain('logo.png binaire');
     expect(texte()).toContain('src/a.ts +1−1');
   });
+
+  const clic = async (fx: { whenStable(): Promise<unknown> }, el: HTMLElement, i: number) => {
+    el.querySelectorAll<HTMLButtonElement>('.fichiers button')[i].click();
+    await fx.whenStable();
+  };
+
+  it('renommage : la section est choisie par position', async () => {
+    const diff = 'diff --git a/ancien.ts b/nouveau.ts\nsimilarity index 90%\nrename from ancien.ts\nrename to nouveau.ts\n+renomme\ndiff --git a/z.ts b/z.ts\n+autre';
+    const { fx, el } = await ouvrir({ diff, fichiers: [{ fichier: 'ancien.ts → nouveau.ts', ajouts: 1, suppressions: 0 }, { fichier: 'z.ts', ajouts: 1, suppressions: 0 }], tronque: false });
+    await clic(fx, el, 0);
+    expect(el.querySelector('pre')!.textContent).toContain('+renomme');
+    expect(el.querySelector('pre')!.textContent).not.toContain('+autre');
+  });
+
+  it('nom cité par git : la section est trouvée', async () => {
+    const diff = 'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"\n+cite\ndiff --git a/z.ts b/z.ts\n+autre';
+    const { fx, el } = await ouvrir({ diff, fichiers: [{ fichier: 'café.ts', ajouts: 1, suppressions: 0 }, { fichier: 'z.ts', ajouts: 1, suppressions: 0 }], tronque: false });
+    await clic(fx, el, 0);
+    expect(el.querySelector('pre')!.textContent).toContain('+cite');
+    expect(el.querySelector('pre')!.textContent).not.toContain('+autre');
+  });
+
+  it('fichier au-delà du diff tronqué : bandeau au lieu d’une section vide', async () => {
+    const { fx, el } = await ouvrir({ diff: 'diff --git a/a.ts b/a.ts\n+a', fichiers: [{ fichier: 'a.ts', ajouts: 1, suppressions: 0 }, { fichier: 'b.ts', ajouts: 1, suppressions: 0 }], tronque: false });
+    await clic(fx, el, 1);
+    expect([...el.querySelectorAll('.alerte')].map(a => a.textContent)).toContain('Diff tronqué : récupère la branche pour tout voir');
+  });
 });

@@ -47,7 +47,7 @@ type Onglet = 'diff' | 'rapports' | 'avis' | 'journal';
         @if (message(); as m) { <p class="go">{{ m }}</p> }
         @if (erreur(); as e) { <p class="alerte">{{ e }}</p> }
         <div class="actions">
-          <button [disabled]="envoi()" (click)="recuperer()">Récupérer la branche</button>
+          <button [disabled]="envoi() || !!raisonIntegrite()" (click)="recuperer()">Récupérer la branche</button>
           <button class="principal" [disabled]="envoi() || !!raisonIntegrite()" (click)="ouvrirPr()">Ouvrir une PR</button>
           <button [disabled]="envoi()" (click)="dialogue.set('renvoi')">Renvoyer avec commentaire</button>
           <button class="danger" [disabled]="envoi()" (click)="dialogue.set('abandon')">Abandonner</button>

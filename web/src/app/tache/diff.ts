@@ -30,13 +30,14 @@ function sections(diff: string): string[][] {
     <ul class="fichiers">
       @for (f of fichiers(); track $index) {
         <li>
-          <button [class.actif]="choisi() === f.fichier" (click)="choisir(f.fichier)">
+          <button [class.actif]="choisi() === $index" (click)="choisir($index)">
             <span class="mono">{{ f.nom }}</span>
             @if (f.binaire) { <span class="doux"> binaire</span> } @else { <span class="go"> +{{ f.ajouts }}</span> <span class="nogo">−{{ f.suppressions }}</span> }
           </button>
         </li>
       }
     </ul>
+    @if (sectionAbsente()) { <p class="alerte">Diff tronqué : récupère la branche pour tout voir</p> }
     <pre class="diff">@for (l of lignes(); track $index) {<span [class]="l.classe">{{ l.texte }}</span>}</pre>`,
   styles: `
     .fichiers { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -48,7 +49,7 @@ function sections(diff: string): string[][] {
 })
 export class DiffVue {
   readonly donnees = input.required<{ diff: string; fichiers: FichierModifie[]; tronque: boolean }>();
-  protected readonly choisi = signal<string | null>(null);
+  protected readonly choisi = signal<number | null>(null);
 
   protected readonly fichiers = computed(() => this.donnees().fichiers.map(f => ({
     ...f, nom: commandeVisible(f.fichier).texte, binaire: f.ajouts === null || f.suppressions === null,
@@ -59,13 +60,17 @@ export class DiffVue {
     const choisi = this.choisi();
     let brutes = diff === '' ? [] : diff.split('\n');
     if (choisi !== null) {
-      const section = sections(diff).find(s => s[0].startsWith('diff --git ') && (s[0].endsWith(` b/${choisi}`) || s[0].includes(` b/${choisi} `)));
-      brutes = section ?? [];
+      // numstat et diff viennent des mêmes options git : le i-ème fichier est la i-ème section (renommages et noms cités compris).
+      brutes = sections(diff).filter(s => s[0].startsWith('diff --git '))[choisi] ?? [];
     }
     return brutes.map(l => ({ texte: commandeVisible(l).texte, classe: classeDe(l) }));
+  });
+  protected readonly sectionAbsente = computed(() => {
+    const c = this.choisi();
+    return c !== null && sections(this.donnees().diff).filter(s => s[0].startsWith('diff --git ')).length <= c;
   });
   protected readonly suspecte = computed(() => this.donnees().diff.split('\n').some(l => commandeVisible(l).suspecte)
     || this.donnees().fichiers.some(f => commandeVisible(f.fichier).suspecte));
 
-  protected choisir(fichier: string) { this.choisi.set(this.choisi() === fichier ? null : fichier); }
+  protected choisir(i: number) { this.choisi.set(this.choisi() === i ? null : i); }
 }

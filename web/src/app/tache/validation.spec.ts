@@ -55,7 +55,7 @@ describe('ValidationVue', () => {
     expect(texte()).toContain('✕ Intégrité non vérifiée : sha différent');
     expect(el.querySelector('.nogo')).not.toBeNull();
     expect(bouton('Ouvrir une PR').disabled).toBe(true);
-    expect(bouton('Récupérer la branche').disabled).toBe(false);
+    expect(bouton('Récupérer la branche').disabled).toBe(true);
   });
 
   it('onglets : avis du patron et journal', async () => {
