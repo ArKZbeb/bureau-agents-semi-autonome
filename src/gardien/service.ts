@@ -137,7 +137,8 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   const ctx: Contexte = { tacheId, titre: tache.titre, plan, zones: zonesDuPlan(plan) };
 
   // Droit d'écriture par agent : après le contrôle d'intégrité du plan, pour qu'une altération arrête aussi ces appels.
-  if (OUTILS_ECRITURE.has(outil) && tache.agent !== null && !AGENTS_ECRITURE.has(tache.agent))
+  // Sans agent déclaré, lecture seule (fail-closed).
+  if (OUTILS_ECRITURE.has(outil) && (tache.agent === null || !AGENTS_ECRITURE.has(tache.agent)))
     return refusListe('agent en lecture seule : Write et Edit retirés');
   if (OUTILS_ECRITURE.has(outil) && tache.agent === 'cadreur') {
     const chemin = path.posix.resolve(RACINE, String(entree.file_path));

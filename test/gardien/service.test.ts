@@ -16,6 +16,8 @@ function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, string>;
   creerTache(db, { id: 'T-45', projet: 'Conducteur', titre: 'Import CSV des conducteurs', cheminProjet: '/p', budgetUsd: 6 });
   enregistrerArtefact(db, cle, 'T-45', 'plan', PLAN);
   appliquer(db, 'T-45', { type: 'demarrage' });
+  // Comme le pipeline : un agent est déclaré pendant l'étape (sans agent, Write et Edit sont refusés).
+  definirAgent(db, 'T-45', 'implementeur');
   const demandes: DemandeAvis[] = [];
   const escalades: string[] = [];
   const deps: DepsGardien = {
@@ -325,4 +327,15 @@ test('agent inconnu : écriture refusée', async () => {
   definirAgent(db, 'T-45', 'inconnu');
   assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
   assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+});
+
+test('aucun agent déclaré : Write et Edit refusés (lecture seule par défaut, fail-closed)', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', null);
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+  const edit = { tool_name: 'Edit', tool_input: { file_path: '/workspace/projet/src/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_sans_agent' };
+  assert.equal(decision(await decider(deps, 'T-45', edit)), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+  assert.equal(decision(await decider(deps, 'T-45', bash('dotnet test'))), 'allow', 'lecture et Bash inchangés');
 });
