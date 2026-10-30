@@ -193,6 +193,28 @@ export async function creerConteneurAgent(
   return c;
 }
 
+/** Conteneur d'analyse : mêmes protections que les agents, sans Claude Code ; la commande est son processus principal. */
+export async function creerConteneurAnalyse(
+  docker: Docker,
+  o: { tacheId: string; imageId: string; reseau: string; env: string[]; ressources: Ressources; cmd: string[]; montages: Docker.MountConfig },
+): Promise<Docker.Container> {
+  const c = await docker.createContainer({
+    Image: o.imageId, User: 'node', WorkingDir: RACINE_PROJET, Cmd: o.cmd, Env: o.env,
+    Labels: { [LABEL_TACHE]: o.tacheId },
+    HostConfig: {
+      ...DURCISSEMENT, NetworkMode: o.reseau, Memory: o.ressources.memoire, NanoCpus: Math.round(o.ressources.cpus * 1e9),
+      PidsLimit: o.ressources.pids, Tmpfs: { '/tmp': 'rw,nosuid,size=512m' }, Mounts: o.montages,
+    },
+  });
+  try {
+    await c.start();
+  } catch (e) {
+    await c.remove({ force: true }).catch(() => {});
+    throw e;
+  }
+  return c;
+}
+
 export async function executerDans(conteneur: Docker.Container, cmd: string[], surSortie: (m: Buffer) => void): Promise<{ code: number; erreurs: string }> {
   const exec = await conteneur.exec({ Cmd: cmd, AttachStdout: true, AttachStderr: true, User: 'node', WorkingDir: RACINE_PROJET });
   const flux = await exec.start({ hijack: true, stdin: false });

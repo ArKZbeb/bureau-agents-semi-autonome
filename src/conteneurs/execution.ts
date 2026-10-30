@@ -46,6 +46,16 @@ function messageEscalade(db: Base, tacheId: string): string {
     : `J’ai refusé : ${appel}${e.commentaire ? ` (${e.commentaire})` : ''}. Ne le relance pas ; trouve une autre approche conforme au plan, ou arrête-toi en expliquant le blocage.`;
 }
 
+// Aucun secret : ANTHROPIC_API_KEY porte le jeton de la tâche, que le proxy remplace par la vraie clé.
+export function envTache(jeton: string): string[] {
+  const passerelle = `http://passerelle:${PORT_INTERNE_PASSERELLE}`;
+  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
+  return [
+    `ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`,
+    `HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle',
+  ];
+}
+
 export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: Agent, prompt: string, options: { volume?: string } = {}): Promise<ResultatEtape> {
   const tache = lireTache(deps.db, tacheId);
   if (tache.statut !== 'prete') throw new Error(`${tacheId} n’est pas prête (${tache.statut})`);
@@ -81,8 +91,6 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
 
   appliquer(deps.db, tacheId, { type: 'demarrage' });
   const jeton = deps.jetons.creer(tacheId, agent.dureeMaxMs + 10 * 60_000);
-  const passerelle = `http://passerelle:${PORT_INTERNE_PASSERELLE}`;
-  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
   const suivi: Suivi = { fin: null, sessionId: r?.sessionId ?? null, outils: new Set(), resultats: new Set(), expire: false };
   let conteneur: Docker.Container | undefined;
   let minuteur: NodeJS.Timeout | undefined;
@@ -97,11 +105,7 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     const reseau = await preparerReseau(deps.docker, tacheId);
     const c = await creerConteneurAgent(deps.docker, {
       tacheId, imageId, reseau, volume, ressources: deps.config.conteneur, parametresVides: fichierParametresVides(deps.config.dossierDonnees),
-      // Aucun secret : ANTHROPIC_API_KEY porte le jeton de la tâche, que le proxy remplace par la vraie clé.
-      env: [
-        `ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`,
-        `HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle',
-      ],
+      env: envTache(jeton),
     });
     conteneur = c;
     deps.enCours.set(tacheId, c);

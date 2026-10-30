@@ -11,6 +11,7 @@ import {
   resoudreCheminConteneur, supprimerCopieControle, resoudreCheminVolume,
   verifierDocker, verifierImage,
 } from './conteneurs/docker.ts';
+import { executerAnalyse } from './analyse/execution.ts';
 import { lancerEtape, type Agent, type DepsExecution, type ResultatEtape } from './conteneurs/execution.ts';
 import { ouvrirBase, type Base } from './db.ts';
 import { demanderAvis, type ClientAvis } from './gardien/avis.ts';
@@ -41,6 +42,7 @@ export type OptionsOrchestrateur = {
 };
 export type Orchestrateur = {
   db: Base; jetonSession: string; urlUi: string;
+  execution: DepsExecution;
   creerTache: (t: Omit<NouvelleTache, 'id'> & { id?: string; demande: string }) => Promise<Tache>;
   validerArtefact: (tacheId: string, type: TypeArtefact, contenu: string) => Artefact;
   lancerEtape: (tacheId: string, agent: Agent, prompt: string) => Promise<ResultatEtape>;
@@ -120,6 +122,8 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
       ? demanderControle(client, optionsControle, d)
       : Promise.resolve({ verdict: 'indisponible' as const, constats: ['clé API absente : contrôleur d’intégrité indisponible'], coutUsd: 0 })),
     lireFichier: (volume, chemin) => lireFichierVolume(docker, manifeste.image, volume, chemin),
+    analyser: (id, volume, base) => executerAnalyse(execution, id, volume, base),
+    shaCopie: volume => lireShaVolume(docker, manifeste.image, volume),
   };
   const ordonnanceur = creerOrdonnanceur(pipeline, { simultanees: config.tachesSimultanees, intervalleMs: 5_000, delaisErreurApiMs: [60_000, 300_000, 900_000] });
 
@@ -213,7 +217,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
   }
   ordonnanceur.demarrer();
   return {
-    db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`,
+    db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`, execution,
     creerTache: creerTacheAvecDemande,
     validerArtefact: (tacheId, type, contenu) => enregistrerArtefact(db, cle, tacheId, type, contenu),
     lancerEtape: (tacheId, agent, prompt) => lancerEtape(execution, tacheId, agent, prompt),
