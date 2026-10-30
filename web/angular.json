@@ -17,6 +17,7 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "src/main.ts",
+            "deployUrl": "/",
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
@@ -59,18 +60,6 @@
             }
           },
           "defaultConfiguration": "production"
-        },
-        "serve": {
-          "builder": "@angular/build:dev-server",
-          "configurations": {
-            "production": {
-              "buildTarget": "web:build:production"
-            },
-            "development": {
-              "buildTarget": "web:build:development"
-            }
-          },
-          "defaultConfiguration": "development"
         },
         "test": {
           "builder": "@angular/build:unit-test"

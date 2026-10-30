@@ -31,3 +31,12 @@ test('liens symboliques ignorés', () => {
   fs.symlinkSync('/etc/hostname', path.join(d, 'fuite.txt'));
   assert.equal(chargerPanneau(d)!.has('/fuite.txt'), false);
 });
+
+test("CSP base-uri 'none' : le panneau n'utilise pas <base> et la construction émet des URL absolues", () => {
+  // Le navigateur ignore <base> sous base-uri 'none' : des URL relatives se résoudraient sous /taches/ sur une route profonde.
+  const racine = path.join(import.meta.dirname, '../../web');
+  assert.doesNotMatch(fs.readFileSync(path.join(racine, 'src/index.html'), 'utf8'), /<base\b/i);
+  assert.doesNotMatch(fs.readFileSync(path.join(racine, 'src/index.html'), 'utf8'), /(href|src)="(?!\/)/i);
+  const angular = JSON.parse(fs.readFileSync(path.join(racine, 'angular.json'), 'utf8'));
+  assert.equal(angular.projects.web.architect.build.options.deployUrl, '/');
+});
