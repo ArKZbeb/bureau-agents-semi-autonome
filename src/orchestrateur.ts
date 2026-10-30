@@ -21,7 +21,9 @@ import { enregistrerArtefact, lireArtefact, type Artefact, type TypeArtefact } f
 import { chargerOuCreerCle } from './integrite/cle.ts';
 import { ajouterAuJournal, lireJournal, verifierJournal, type NouvelleEntree } from './integrite/journal.ts';
 import { verifierManifeste } from './integrite/manifeste.ts';
-import { arbitrer, continuerBudget, repondreCadreur, reprendre, validerCadrage } from './pipeline/actions.ts';
+import {
+  arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, repondreCadreur, reprendre, validerCadrage,
+} from './pipeline/actions.ts';
 import { demanderControle } from './pipeline/controleur.ts';
 import { creerOrdonnanceur } from './pipeline/ordonnanceur.ts';
 import type { DepsPipeline } from './pipeline/pipeline.ts';
@@ -102,10 +104,6 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     journaliserRefus: (id, cible) => journaliser({ tacheId: id ?? '—', type: 'reseau', commande: `connexion à ${cible}`, couche: '—', decision: 'Refusé', decideur: 'Proxy', raison: 'domaine hors liste blanche' }),
   });
 
-  const arretGlobal = async () => {
-    for (const t of listerTaches(db)) if (t.statut === 'en_cours') appliquer(db, t.id, { type: 'pause', raison: 'arret_global', detail: 'arrêt global demandé' });
-    return { conteneursArretes: await arreterConteneurs(docker) };
-  };
   const decision = (id: number, d: 'approuver' | 'refuser', commentaire: string) => deciderEscalade(db, cle, id, d, commentaire);
 
   const execution: DepsExecution = { docker, db, cle, jetons, evenements, config, racineDepot: o.racineDepot, enCours, surOutil: o.surOutil };
@@ -124,6 +122,19 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     lireFichier: (id, chemin) => lireFichierVolume(docker, manifeste.image, nomRessource(id), chemin),
   };
   const ordonnanceur = creerOrdonnanceur(pipeline, { simultanees: config.tachesSimultanees, intervalleMs: 5_000, delaisErreurApiMs: [60_000, 300_000, 900_000] });
+
+  // Arrêt global : l'ordonnanceur est suspendu d'abord (plus aucune relance), puis toute tâche prête ou en cours
+  // passe en pause, puis les conteneurs sont tués. Seule ma reprise globale réactive l'ordonnanceur.
+  const arretGlobal = async () => {
+    ordonnanceur.suspendre();
+    pauserPourArretGlobal(db);
+    return { conteneursArretes: await arreterConteneurs(docker) };
+  };
+  const repriseGlobale = () => {
+    ordonnanceur.reactiver();
+    journaliserRepriseGlobale(db, cle);
+    return { ordonnanceur: 'actif' };
+  };
 
   const creerTacheAvecDemande = async (t: Omit<NouvelleTache, 'id'> & { id?: string; demande: string }) => {
     if (t.id !== undefined && !/^T-\d+$/.test(t.id)) throw new Error(`identifiant de tâche invalide : ${t.id}`);
@@ -146,6 +157,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     escalades: () => db.prepare(`SELECT id, tache_id AS tacheId, outil, entree, raison, cree_le AS creeLe FROM escalades WHERE statut = 'en_attente' ORDER BY id`).all(),
     deciderEscalade: decision,
     arretGlobal,
+    repriseGlobale,
     tache: id => {
       if (!db.prepare('SELECT 1 FROM taches WHERE id = ?').get(id)) return null;
       const t = lireTache(db, id);

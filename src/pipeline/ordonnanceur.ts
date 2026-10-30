@@ -19,19 +19,26 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
   const tentatives = new Map<string, Suivi>();
   let minuteur: NodeJS.Timeout | undefined;
   let enTour = false;
+  // Arrêt global : suspendu, l'ordonnanceur ne lance aucune étape et ne reprend aucune pause.
+  let suspendu = false;
 
   const lancer = (id: string) => {
     const p = avancer(deps, id).then(() => {}, (e: unknown) => {
-      const message = (e instanceof Error ? e.message : String(e)).slice(0, 200);
-      const t = lireTache(deps.db, id);
-      if (t.statut === 'en_cours' || t.statut === 'prete') appliquer(deps.db, id, { type: 'pause', raison: 'erreur_api', detail: message });
-      ajouterAuJournal(deps.db, deps.cle, { tacheId: id, type: 'evenement', commande: 'exécution de l’étape', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: message });
+      // Le gestionnaire lui-même peut échouer (base indisponible) : jamais de promesse rejetée non gérée.
+      try {
+        const message = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+        const t = lireTache(deps.db, id);
+        if (t.statut === 'en_cours' || t.statut === 'prete') appliquer(deps.db, id, { type: 'pause', raison: 'erreur_api', detail: message });
+        ajouterAuJournal(deps.db, deps.cle, { tacheId: id, type: 'evenement', commande: 'exécution de l’étape', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: message });
+      } catch (err) {
+        journaliserErreur(id, 'exécution de l’étape', err);
+      }
     }).finally(() => enVol.delete(id));
     enVol.set(id, p);
   };
 
   const tour = async () => {
-    if (enTour) return;
+    if (enTour || suspendu) return;
     enTour = true;
     try {
       const maintenant = horloge();
@@ -73,17 +80,20 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
   };
 
   // Une erreur de tour (base, horloge) est journalisée : le minuteur ne laisse jamais de promesse rejetée.
-  const journaliserErreurTour = (e: unknown) => {
+  function journaliserErreur(tacheId: string, commande: string, e: unknown) {
     try {
-      ajouterAuJournal(deps.db, deps.cle, { tacheId: '—', type: 'evenement', commande: 'ordonnancement', couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
+      ajouterAuJournal(deps.db, deps.cle, { tacheId, type: 'evenement', commande, couche: '—', decision: 'Refusé', decideur: 'Orchestrateur', raison: (e instanceof Error ? e.message : String(e)).slice(0, 200) });
     } catch {
       // Base indisponible : rien de plus à faire, le tour suivant réessaiera.
     }
-  };
+  }
+  const journaliserErreurTour = (e: unknown) => journaliserErreur('—', 'ordonnancement', e);
 
   return {
     tour,
     enVol: () => [...enVol.keys()],
+    suspendre: () => { suspendu = true; },
+    reactiver: () => { suspendu = false; },
     demarrer: () => { minuteur ??= setInterval(() => void tour().catch(journaliserErreurTour), o.intervalleMs); },
     arreter: async () => { clearInterval(minuteur); minuteur = undefined; await Promise.all(enVol.values()); },
   };

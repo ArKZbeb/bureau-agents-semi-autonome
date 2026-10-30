@@ -162,3 +162,69 @@ test('erreur de tour pendant le minuteur : journalisée, pas de promesse rejeté
   assert.equal(entrees[0].tacheId, '—');
   assert.equal(entrees[0].decideur, 'Orchestrateur');
 });
+
+test('suspendu (arrêt global) : ni lancement ni reprise de pause erreur_api échue ; réactivé : comportement normal', async () => {
+  const b = banc(1);
+  let maintenant = 0;
+  appliquer(b.db, 'T-1', { type: 'demarrage' });
+  appliquer(b.db, 'T-1', { type: 'pause', raison: 'erreur_api', detail: '529 : surcharge' });
+  const lances: string[] = [];
+  const o = creerOrdonnanceur(b.deps, { simultanees: 2, intervalleMs: 10, delaisErreurApiMs: [1000], horloge: () => maintenant }, async (_d, id) => {
+    lances.push(id);
+    return lireTache(b.db, id);
+  });
+  await o.tour(); // pause observée à 0
+  o.suspendre();
+  creerTache(b.db, { id: 'T-2', projet: 'p', titre: 't', cheminProjet: '/p', budgetUsd: 6 });
+  maintenant = 5000; await o.tour(); await o.tour();
+  assert.deepEqual(lances, [], 'rien n’est lancé pendant la suspension');
+  assert.equal(lireTache(b.db, 'T-1').statut, 'en_pause', 'pause échue non reprise pendant la suspension');
+  assert.equal(lireTache(b.db, 'T-2').statut, 'prete');
+  o.reactiver();
+  await o.tour();
+  assert.equal(lireTache(b.db, 'T-1').statut, 'prete', 'pause échue reprise après réactivation');
+  assert.deepEqual([...lances].sort(), ['T-1', 'T-2']);
+  await o.arreter();
+});
+
+test('pauses integrite, arret_global, budget et escalade : jamais reprises, même délais écoulés', async () => {
+  const b = banc(4);
+  let maintenant = 0;
+  const raisons = ['integrite', 'arret_global', 'budget', 'escalade'] as const;
+  raisons.forEach((raison, i) => {
+    appliquer(b.db, `T-${i + 1}`, { type: 'demarrage' });
+    appliquer(b.db, `T-${i + 1}`, { type: 'pause', raison, detail: 'x' });
+  });
+  const lances: string[] = [];
+  const o = creerOrdonnanceur(b.deps, { simultanees: 4, intervalleMs: 10, delaisErreurApiMs: [1, 1, 1] , horloge: () => maintenant }, async (_d, id) => {
+    lances.push(id);
+    return lireTache(b.db, id);
+  });
+  for (const t of [0, 10, 1000, 1_000_000, 1e9]) { maintenant = t; await o.tour(); await o.tour(); }
+  assert.deepEqual(lances, []);
+  raisons.forEach((raison, i) => {
+    const t = lireTache(b.db, `T-${i + 1}`);
+    assert.equal(t.statut, 'en_pause');
+    assert.equal(t.raison, `${raison} : x`);
+  });
+  await o.arreter();
+});
+
+test('erreur dans le gestionnaire d’échec d’une étape : aucune promesse rejetée non gérée', async () => {
+  const b = banc(1);
+  const rejets: unknown[] = [];
+  const surRejet = (e: unknown) => rejets.push(e);
+  process.on('unhandledRejection', surRejet);
+  try {
+    const o = creerOrdonnanceur(b.deps, { simultanees: 1, intervalleMs: 10, delaisErreurApiMs: [] }, async () => {
+      b.db.close(); // le gestionnaire ne peut plus lire la tâche ni écrire au journal
+      throw new Error('Docker ne répond plus');
+    });
+    await o.tour();
+    await o.arreter();
+    await new Promise(r => setImmediate(r));
+    assert.deepEqual(rejets, []);
+  } finally {
+    process.off('unhandledRejection', surRejet);
+  }
+});

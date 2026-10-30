@@ -10,6 +10,8 @@ export type RoutesUi = {
   escalades: () => unknown;
   deciderEscalade: (id: number, decision: 'approuver' | 'refuser', commentaire: string) => unknown;
   arretGlobal: () => Promise<unknown>;
+  /** Réactive l'ordonnanceur suspendu par l'arrêt global ; les tâches restent en pause. */
+  repriseGlobale: () => unknown;
   tache: (id: string) => unknown;
   creerTache: (t: { projet: string; titre: string; cheminProjet: string; budgetUsd: number; demande: string }) => Promise<unknown>;
   action: (id: string, nom: NomAction, corps: Record<string, unknown>) => unknown;
@@ -83,5 +85,6 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
     }
   }
   if (req.method === 'POST' && url.pathname === '/api/arret-global') return repondreJson(res, 200, await routes.arretGlobal());
+  if (req.method === 'POST' && url.pathname === '/api/reprise-globale') return repondreJson(res, 200, routes.repriseGlobale());
   repondreJson(res, 404, { erreur: 'introuvable' });
 }

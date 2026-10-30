@@ -9,6 +9,7 @@ const JETON = 'jeton-de-session';
 async function monter() {
   const decisions: unknown[] = [];
   let arrets = 0;
+  let reprises = 0;
   const actions: unknown[] = [];
   const creations: unknown[] = [];
   const serveur = creerServeurUi(JETON, {
@@ -17,6 +18,7 @@ async function monter() {
     escalades: () => [{ id: 1 }],
     deciderEscalade: (id, decision, commentaire) => { decisions.push([id, decision, commentaire]); return { ok: true }; },
     arretGlobal: async () => { arrets++; return { conteneursArretes: 2 }; },
+    repriseGlobale: () => { reprises++; return { ordonnanceur: 'actif' }; },
     tache: id => (id === 'T-41' ? { id } : null),
     creerTache: async t => { creations.push(t); return { id: 'T-42', ...t }; },
     action: (id, nom, corps) => { if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi'); actions.push([id, nom, corps]); return { ok: true }; },
@@ -34,7 +36,7 @@ async function monter() {
       req.on('error', ko);
       req.end(o.corps === undefined ? undefined : JSON.stringify(o.corps));
     });
-  return { adresse, appeler, decisions, actions, creations, arrets: () => arrets, fermer: () => serveur.close() };
+  return { adresse, appeler, decisions, actions, creations, arrets: () => arrets, reprises: () => reprises, fermer: () => serveur.close() };
 }
 
 test('écoute uniquement sur 127.0.0.1', async () => {
@@ -115,4 +117,16 @@ test('POST /api/taches : cheminProjet relatif refusé (400)', async () => {
   assert.equal(r.statut, 400);
   assert.equal(s.creations.length, 0);
   s.fermer();
+});
+
+test('reprise globale : réactive l’ordonnanceur, derrière les mêmes contrôles', async () => {
+  const m = await monter();
+  assert.equal((await m.appeler('/api/reprise-globale', { methode: 'POST', entetes: { origin: 'https://evil.example' } })).statut, 403);
+  assert.equal((await m.appeler('/api/reprise-globale', { methode: 'POST', entetes: { authorization: 'Bearer faux' } })).statut, 401);
+  assert.equal((await m.appeler('/api/reprise-globale', { methode: 'POST', entetes: { host: `bureau.evil.example:${m.adresse.port}` } })).statut, 403);
+  assert.equal((await m.appeler('/api/reprise-globale')).statut, 404, 'GET refusé');
+  assert.equal(m.reprises(), 0);
+  assert.deepEqual(await m.appeler('/api/reprise-globale', { methode: 'POST' }), { statut: 200, corps: { ordonnanceur: 'actif' } });
+  assert.equal(m.reprises(), 1);
+  m.fermer();
 });

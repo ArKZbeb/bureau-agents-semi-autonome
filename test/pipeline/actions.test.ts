@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ouvrirBase } from '../../src/db.ts';
 import { lireArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal, verifierJournal } from '../../src/integrite/journal.ts';
-import { arbitrer, continuerBudget, repondreCadreur, reprendre, validerCadrage } from '../../src/pipeline/actions.ts';
+import { arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, repondreCadreur, reprendre, validerCadrage } from '../../src/pipeline/actions.ts';
 import { appliquer, creerTache, lireTache } from '../../src/taches/depot.ts';
 import { enregistrerProposition, listerEchanges, lireProposition } from '../../src/taches/echanges.ts';
 
@@ -76,4 +76,28 @@ test('arbitrage : approche du cadreur ou alternative du patron', () => {
   const db = tache();
   db.prepare(`UPDATE taches SET etape = 'patron_plan', statut = 'attente_humain', echanges_plan = 2 WHERE id = 'T-43'`).run();
   assert.equal(arbitrer(db, cle, 'T-43', 'cadreur').etape, 'implementation');
+});
+
+test('arrêt global : tâches prêtes et en cours en pause arret_global, les autres intactes', () => {
+  const db = ouvrirBase(':memory:');
+  for (const id of ['T-1', 'T-2', 'T-3', 'T-4']) creerTache(db, { id, projet: 'p', titre: 't', cheminProjet: '/p', budgetUsd: 6 });
+  appliquer(db, 'T-2', { type: 'demarrage' });
+  appliquer(db, 'T-3', { type: 'demarrage' });
+  appliquer(db, 'T-3', { type: 'etape_terminee', verdict: 'questions' });
+  appliquer(db, 'T-4', { type: 'demarrage' });
+  appliquer(db, 'T-4', { type: 'pause', raison: 'budget', detail: 'x' });
+  assert.deepEqual(pauserPourArretGlobal(db), ['T-1', 'T-2']);
+  assert.deepEqual(['T-1', 'T-2', 'T-3', 'T-4'].map(id => lireTache(db, id).raison), [
+    'arret_global : arrêt global demandé', 'arret_global : arrêt global demandé', 'le cadreur attend ta réponse', 'budget : x',
+  ]);
+});
+
+test('reprise globale : décision « Moi » journalisée, tâches toujours en pause', () => {
+  const db = tache();
+  appliquer(db, 'T-43', { type: 'pause', raison: 'arret_global', detail: 'arrêt global demandé' });
+  journaliserRepriseGlobale(db, cle);
+  const e = lireJournal(db).at(-1)!;
+  assert.deepEqual([e.tacheId, e.type, e.decideur, e.decision, e.couche, e.commande], ['—', 'decision', 'Moi', 'Autorisé', 'humain', 'reprise globale']);
+  assert.equal(lireTache(db, 'T-43').statut, 'en_pause');
+  verifierJournal(db, cle);
 });

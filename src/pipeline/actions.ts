@@ -1,7 +1,7 @@
 import type { Base } from '../db.ts';
 import { enregistrerArtefact } from '../integrite/artefacts.ts';
 import { ajouterAuJournal } from '../integrite/journal.ts';
-import { appliquer, augmenterBudget, lireTache, type Tache } from '../taches/depot.ts';
+import { appliquer, augmenterBudget, listerTaches, lireTache, type Tache } from '../taches/depot.ts';
 import { RAISON_PROPOSITION } from '../taches/etats.ts';
 import { ajouterEchange, lireProposition, supprimerProposition } from '../taches/echanges.ts';
 import { numeroterCriteres } from './prompts.ts';
@@ -57,4 +57,20 @@ export function reprendre(db: Base, cle: Buffer, tacheId: string): Tache {
   const suite = appliquer(db, tacheId, { type: 'reprise' });
   journaliser(db, cle, tacheId, 'reprise de la tâche', t.raison ?? t.statut);
   return suite;
+}
+
+/** Arrêt global (ordonnanceur déjà suspendu) : toute tâche prête ou en cours passe en pause arret_global. */
+export function pauserPourArretGlobal(db: Base): string[] {
+  const pausees: string[] = [];
+  for (const t of listerTaches(db)) {
+    if (t.statut !== 'prete' && t.statut !== 'en_cours') continue;
+    appliquer(db, t.id, { type: 'pause', raison: 'arret_global', detail: 'arrêt global demandé' });
+    pausees.push(t.id);
+  }
+  return pausees;
+}
+
+/** Reprise globale : l'ordonnanceur est réactivé ; chaque tâche reste en pause et se reprend à la main. */
+export function journaliserRepriseGlobale(db: Base, cle: Buffer): void {
+  journaliser(db, cle, '—', 'reprise globale', 'ordonnanceur réactivé ; chaque tâche en pause se reprend à la main');
 }
