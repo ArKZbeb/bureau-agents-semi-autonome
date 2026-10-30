@@ -33,6 +33,12 @@ export const TARIFS: Tarifs = {
   'claude-haiku-5-5': { entree: 0.1, sortie: 0.5 },
 };
 
+// Entier ≥ 1 écrit en chiffres ; toute autre valeur (0, négatif, décimal, texte) donne la valeur par défaut.
+function entierPositif(valeur: string | undefined, defaut: number): number {
+  const n = Number(valeur);
+  return valeur !== undefined && /^\d+$/.test(valeur) && Number.isSafeInteger(n) && n >= 1 ? n : defaut;
+}
+
 export function chargerConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const base = env.LOCALAPPDATA ?? path.join(os.homedir(), '.local', 'share');
   return {
@@ -48,6 +54,6 @@ export function chargerConfig(env: NodeJS.ProcessEnv = process.env): Config {
     domainesAutorises: ['registry.npmjs.org', 'api.nuget.org', 'nuget.org'],
     conteneur: { memoire: 4 * 1024 ** 3, cpus: 2, pids: 512 },
     modeles: Object.fromEntries(Object.entries(MODELES).map(([nom, defaut]) => [nom, env[`BUREAU_MODELE_${nom.toUpperCase()}`] ?? defaut])) as Record<NomModele, string>,
-    tachesSimultanees: Number(env.BUREAU_TACHES_SIMULTANEES ?? 2),
+    tachesSimultanees: entierPositif(env.BUREAU_TACHES_SIMULTANEES, 2),
   };
 }

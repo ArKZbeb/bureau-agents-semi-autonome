@@ -31,3 +31,10 @@ test('modèles par agent : valeurs de la maquette, surcharge par variable', () =
   assert.equal(c.tachesSimultanees, 2);
   assert.equal(chargerConfig({ BUREAU_MODELE_QA: 'claude-sonnet-5-5' }).modeles.qa, 'claude-sonnet-5-5');
 });
+
+test('BUREAU_TACHES_SIMULTANEES : entier ≥ 1, sinon 2', () => {
+  assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: '3' }).tachesSimultanees, 3);
+  assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: '1' }).tachesSimultanees, 1);
+  for (const v of ['0', '-1', '1.5', 'abc', '', 'Infinity', 'NaN', ' '])
+    assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: v }).tachesSimultanees, 2, `valeur « ${v} »`);
+});
