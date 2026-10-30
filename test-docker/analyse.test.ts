@@ -11,7 +11,7 @@ import { ecrireManifeste } from '../src/integrite/manifeste.ts';
 import { lireJournal } from '../src/integrite/journal.ts';
 import { AnomalieIntegrite } from '../src/integrite/anomalie.ts';
 import { construireImage } from '../src/conteneurs/image.ts';
-import { LABEL_TACHE, nomRessource, preparerCopieControle, RACINE_PROJET, supprimerCopieControle } from '../src/conteneurs/docker.ts';
+import { LABEL_TACHE, lireFichierVolume, nomRessource, preparerCopieControle, RACINE_PROJET, supprimerCopieControle } from '../src/conteneurs/docker.ts';
 import { executerAnalyse } from '../src/analyse/execution.ts';
 import { demarrerOrchestrateur, type Orchestrateur } from '../src/orchestrateur.ts';
 import { lireTache } from '../src/taches/depot.ts';
@@ -120,6 +120,33 @@ EOF
       assert.equal((await docker.listContainers({ all: true, filters: { label: [`${LABEL_TACHE}=${T}`] } })).length, 0);
       assert.equal((await docker.listNetworks({ filters: { name: [nomRessource(T)] } })).filter(n => n.Name === nomRessource(T)).length, 0);
     } finally {
+      await supprimerCopieControle(docker, T);
+    }
+  });
+
+  test('mesurer.sh décide l’applicabilité des stacks de tests sur le dépôt intact', async () => {
+    const tache = lireTache(o.db, T);
+    const volume = await preparerCopieControle(docker, image, T);
+    const mesures = `${nomRessource(T)}-mesures-stacks`;
+    await docker.createVolume({ Name: mesures, Labels: { [LABEL_TACHE]: T } });
+    try {
+      const c = await docker.createContainer({
+        Image: image, User: 'node', WorkingDir: RACINE_PROJET, Cmd: ['/opt/analyse/mesurer.sh', tache.commitBase!], Labels: { [LABEL_TACHE]: T },
+        HostConfig: {
+          NetworkMode: 'none', ReadonlyRootfs: true, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], Tmpfs: { '/tmp': 'rw,nosuid,size=512m' },
+          Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }, { Type: 'volume', Source: mesures, Target: '/mesures' }],
+        },
+      });
+      try {
+        await c.start();
+        assert.equal((await c.wait()).StatusCode, 0);
+      } finally {
+        await c.remove({ force: true });
+      }
+      assert.equal(await lireFichierVolume(docker, image, mesures, '/workspace/stack_angular.na'), '', 'aucun angular.json : Angular non applicable');
+      assert.equal(await lireFichierVolume(docker, image, mesures, '/workspace/stack_dotnet.na'), null, 'solution .NET présente : stack applicable');
+    } finally {
+      await docker.getVolume(mesures).remove({ force: true }).catch(() => {});
       await supprimerCopieControle(docker, T);
     }
   });
