@@ -124,8 +124,18 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     assert.match(ref ?? '', /^[0-9a-f]{40}\n?$/, 'la branche de la tâche porte un commit');
     assert.match(lireArtefact(o.db, cle, T, 'spec')?.contenu ?? '', /Critères d’acceptation/);
     assert.equal(lireArtefact(o.db, cle, T, 'criteres')?.contenu, '1. Le fichier src/export.js existe\n');
-    const types: TypeArtefact[] = ['spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'];
+    const types: TypeArtefact[] = ['spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'analyse', 'verdict'];
     for (const type of types) assert.ok(lireArtefact(o.db, cle, T, type), `${type} lisible et signé`);
+
+    // Dépôt piège sans .NET ni Angular : tests, audits et couverture non applicables, Semgrep et gitleaks ont tourné.
+    const analyse = JSON.parse(lireArtefact(o.db, cle, T, 'analyse')?.contenu ?? 'null');
+    assert.deepEqual(analyse.outils, {
+      tests_dotnet: 'non_applicable', audit_dotnet: 'non_applicable', tests_angular: 'non_applicable',
+      audit_npm: 'non_applicable', semgrep: 'ok', gitleaks: 'ok', couverture: 'non_applicable',
+    });
+    assert.deepEqual(JSON.parse(lireArtefact(o.db, cle, T, 'verdict')?.contenu ?? 'null').regles, [], 'aucune règle QA déclenchée');
+    const mesuresAnalyse = journal.filter(e => e.raison.startsWith('analyse de review'));
+    assert.equal(mesuresAnalyse.length, 7, 'une entrée de journal par outil, couverture comprise');
 
     const volumes = (await docker.listVolumes()).Volumes ?? [];
     assert.ok(!volumes.some(v => v.Name.startsWith(nomRessource(T)) && v.Name.endsWith('-controle')), 'aucune copie de contrôle ne subsiste');

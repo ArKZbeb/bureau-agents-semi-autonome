@@ -74,4 +74,6 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
 - Image des agents + manifeste signé : `npm run image` (à relancer après toute modification de `agents/` ou `conteneur/`).
 - Tests sans Docker : `npm test` ; types : `npm run typecheck` ; tests avec Docker : `npm run test:docker` (lent : plusieurs minutes ; relancer `npm run image` avant si `agents/` ou
   `conteneur/` ont changé).
+- Analyse de review : outils (Semgrep, gitleaks, dotnet, Angular) dans l'image des agents, lancés par l'orchestrateur dans deux conteneurs durcis
+  (`mesurer.sh` puis `tester.sh`) ; toute modification de `conteneur/analyse/` exige `npm run image`.
 - Lancement : `ANTHROPIC_API_KEY=… npm run demarrer` (serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311).
