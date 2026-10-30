@@ -114,6 +114,11 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
       if (tache.reprise === null) {
         const analyse = await deps.analyser(tacheId, volume!, tache.commitBase);
         enregistrerArtefact(db, cle, tacheId, 'analyse', JSON.stringify(analyse, null, 2));
+        // tester.sh a exécuté le code de l'implémenteur dans cette copie : le reviewer reçoit une copie neuve,
+        // du même commit que celui mesuré, sinon anomalie (fail-closed, y compris pour un SHA d'analyse illisible).
+        volume = await deps.copie(tacheId, true);
+        if ((await deps.shaCopie(volume)) !== analyse.sha)
+          throw new AnomalieIntegrite('analyse', 'la copie du reviewer ne correspond pas au commit analysé');
         prompt = promptEtape(db, cle, lireTache(db, tacheId));
       }
     }

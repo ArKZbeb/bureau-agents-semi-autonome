@@ -38,23 +38,25 @@ function banc(sorties: unknown[], o: { controle?: Controle['verdict']; issue?: R
   const controles: DemandeControle[] = [];
   const copies: string[] = [];
   const lectures: string[] = [];
+  const ordre: string[] = [];
   const deps: DepsPipeline = {
     db, cle, config: chargerConfig({}), racineDepot: process.cwd(),
     executer: async (id, agent, prompt, options) => {
       appels.push({ agent, prompt, volume: options.volume });
+      ordre.push(`agent:${agent.nom}`);
       appliquer(db, id, { type: 'demarrage' });
       // Comme lancerEtape : une pause est appliquée à la tâche avant de rendre la main.
       if (o.issue?.issue === 'pause') appliquer(db, id, { type: 'pause', raison: o.issue.raison, detail: 'simulée' });
       return o.issue ?? { issue: 'terminee', resultat: '', sortie: sorties.shift() };
     },
-    copie: async (id, neuve) => { copies.push(`${neuve ? 'neuve' : 'reprise'}:${id}`); return 'bureau-t-41-controle'; },
+    copie: async (id, neuve) => { copies.push(`${neuve ? 'neuve' : 'reprise'}:${id}`); ordre.push(`copie:${neuve ? 'neuve' : 'reprise'}`); return 'bureau-t-41-controle'; },
     supprimerCopie: async id => { copies.push(`supprimee:${id}`); lectures.push('copie supprimée'); },
     controler: async d => { controles.push(d); return { verdict: o.controle ?? 'ok', constats: o.controle === 'signaler' ? ['critère 1 retiré'] : [], coutUsd: 0.001 }; },
-    analyser: async (id, volume, base) => { analyses.push([id, volume, base]); return o.analyse ?? ANALYSE_VERTE; },
-    shaCopie: async () => (o.sha === undefined ? SHA : o.sha),
+    analyser: async (id, volume, base) => { analyses.push([id, volume, base]); ordre.push('analyse'); return o.analyse ?? ANALYSE_VERTE; },
+    shaCopie: async () => { ordre.push('sha'); return o.sha === undefined ? SHA : o.sha; },
     lireFichier: async (volume, chemin) => { lectures.push(`${volume}:${chemin}`); return o.fichiers?.[chemin] ?? null; },
   };
-  return { db, deps, appels, controles, copies, lectures, analyses };
+  return { db, deps, appels, controles, copies, lectures, analyses, ordre };
 }
 
 function valider(db: ReturnType<typeof ouvrirBase>) {
@@ -115,7 +117,8 @@ test('parcours du patron (plan) au QA : copie pour les agents en lecture seule, 
   ]);
   assert.deepEqual(controles.map(c => c.relais), ['Cadrage → Patron (plan)', 'Patron (plan) → Implémentation', 'Implémentation → Review', 'Review → Patron (code)', 'Patron (code) → QA']);
   assert.deepEqual(controles[0].criteresValides, ['Le PDF contient le synopsis']);
-  assert.equal(copies.filter(c => c.startsWith('neuve')).length, 4);
+  // Review : une copie neuve pour l'analyse, une autre pour le reviewer (la première a exécuté le code du dépôt).
+  assert.equal(copies.filter(c => c.startsWith('neuve')).length, 5);
   assert.equal(copies.filter(c => c.startsWith('supprimee')).length, 4);
   assert.equal(lireArtefact(db, cle, 'T-41', 'resume')?.contenu, 'Export PDF ajouté, 12 tests verts.');
   assert.equal(lireArtefact(db, cle, 'T-41', 'avis_patron')?.contenu, 'Plan sûr.');
@@ -272,6 +275,26 @@ test('review : analyse lancée sur la copie, signée, transmise au reviewer', as
   assert.deepEqual(analyses, [['T-41', 'bureau-t-41-controle', BASE]]);
   assert.equal(JSON.parse(lireArtefact(db, cle, 'T-41', 'analyse')!.contenu).sha, SHA);
   assert.ok(appels[0].prompt.includes('"analyse"'), 'analyse dans les documents du reviewer');
+});
+
+test('review : copie neuve analysée, puis copie neuve pour le reviewer, au même SHA que l’analyse', async () => {
+  const { db, deps, appels, ordre } = banc([{ rapport: 'RAS' }]);
+  aEtape(db, 'review');
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.etape, 'patron_code');
+  // tester.sh a exécuté le code de l'implémenteur dans la première copie : le reviewer n'y travaille jamais.
+  assert.deepEqual(ordre, ['copie:neuve', 'analyse', 'copie:neuve', 'sha', 'agent:reviewer']);
+  assert.equal(appels[0].volume, 'bureau-t-41-controle');
+});
+
+test('review : copie du reviewer à un autre SHA que l’analyse = pause d’intégrité, aucun agent', async () => {
+  const { db, deps, appels } = banc([{ rapport: 'RAS' }], { sha: 'c'.repeat(40) });
+  aEtape(db, 'review');
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.etape, t.statut], ['review', 'en_pause']);
+  assert.equal(t.raison?.split(' : ')[0], 'integrite');
+  assert.equal(appels.length, 0);
+  assert.equal(lireJournal(db, 'T-41').at(-1)?.decideur, 'Contrôleur d’intégrité');
 });
 
 test('review sans commit de base : étape bloquée, aucun agent', async () => {
