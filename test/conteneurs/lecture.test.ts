@@ -49,3 +49,11 @@ test('plafond paramétrable : 6 Mo lus sous le plafond d’analyse, refusés au-
   assert.equal(await lireFichierVolume(trop.docker, 'img', 'v', '/workspace/f', PLAFOND_ANALYSE), null);
   assert.equal(trop.commandes[0].at(-1), String(PLAFOND_ANALYSE + 1));
 });
+
+test('lecture du gardien : au-delà du plafond, les premiers octets restent contrôlés (comportement antérieur conservé)', async () => {
+  // Un null ferait sauter le contrôle du contenu d'un script exécuté et figerait l'empreinte d'un fichier modifié.
+  const gros = Buffer.concat([Buffer.from('rm -rf /\n'), Buffer.alloc(PLAFOND_LECTURE, 'a')]);
+  const lu = await lireFichierVolume(fauxDocker(gros).docker, 'img', 'v', '/workspace/f', PLAFOND_LECTURE, 'tronquer');
+  assert.equal(lu?.length, PLAFOND_LECTURE);
+  assert.ok(lu?.startsWith('rm -rf /'));
+});

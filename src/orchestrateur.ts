@@ -7,7 +7,7 @@ import type http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config.ts';
 import {
-  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireShaVolume, lireFichierVolume, nomCopie, nomRessource, preparerCopieControle, preparerEspace,
+  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireShaVolume, lireFichierVolume, nomCopie, nomRessource, PLAFOND_LECTURE, preparerCopieControle, preparerEspace,
   resoudreCheminConteneur, supprimerCopieControle, resoudreCheminVolume,
   verifierDocker, verifierImage,
 } from './conteneurs/docker.ts';
@@ -83,7 +83,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     db, cle,
     lireFichier: (tacheId, chemin) => {
       const c = enCours.get(tacheId);
-      return c ? lireFichierConteneur(c, chemin) : lireFichierVolume(docker, manifeste.image, nomRessource(tacheId), chemin);
+      return c ? lireFichierConteneur(c, chemin) : lireFichierVolume(docker, manifeste.image, nomRessource(tacheId), chemin, PLAFOND_LECTURE, 'tronquer');
     },
     resoudreChemin: (tacheId, chemin) => {
       const c = enCours.get(tacheId);
