@@ -1,5 +1,6 @@
 import type { EtapeAgent } from '../agents/definitions.ts';
 import type { Base } from '../db.ts';
+import { AnomalieIntegrite } from '../integrite/anomalie.ts';
 import { lireArtefact, type TypeArtefact } from '../integrite/artefacts.ts';
 import type { Tache } from '../taches/depot.ts';
 import { listerEchanges, lireProposition } from '../taches/echanges.ts';
@@ -24,7 +25,8 @@ const CONSIGNES: Record<EtapeAgent, string> = {
 export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<string, string> {
   const doc = (type: TypeArtefact): string => {
     const a = lireArtefact(db, cle, tache.id, type);
-    if (!a) throw new Error(`document manquant pour ${tache.id} : ${type}`);
+    // Un document signé attendu à cette étape et absent est une anomalie (pause d'intégrité), jamais une erreur transitoire.
+    if (!a) throw new AnomalieIntegrite(type, `document manquant : ${type}`);
     return a.contenu;
   };
   switch (tache.etape as EtapeAgent) {

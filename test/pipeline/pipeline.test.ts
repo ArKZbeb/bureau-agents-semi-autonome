@@ -201,3 +201,15 @@ test('étape bloquée par l’exécution : copie supprimée, agent libéré', as
   assert.deepEqual([t.statut, t.agent], ['bloquee', null]);
   assert.ok(copies.includes('supprimee:T-41'));
 });
+
+test('document signé manquant : pause d’intégrité, aucun agent lancé', async () => {
+  const { db, deps, appels, controles } = banc([]);
+  valider(db);
+  // Étape de review sans résumé jamais signé (une suppression serait déjà vue par le registre des versions).
+  db.prepare("UPDATE taches SET etape = 'review' WHERE id = 'T-41'").run();
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.statut, t.raison], ['en_pause', 'integrite : document manquant : resume']);
+  assert.equal(appels.length, 0);
+  assert.equal(controles.length, 0);
+  assert.equal(lireJournal(db, 'T-41').at(-1)?.decideur, 'Contrôleur d’intégrité');
+});
