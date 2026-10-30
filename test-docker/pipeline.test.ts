@@ -13,7 +13,7 @@ import { lireArtefact, type TypeArtefact } from '../src/integrite/artefacts.ts';
 import { construireImage } from '../src/conteneurs/image.ts';
 import { brancheTache, lireFichierVolume, nomRessource, RACINE_PROJET } from '../src/conteneurs/docker.ts';
 import { demarrerOrchestrateur, type Orchestrateur } from '../src/orchestrateur.ts';
-import { lireTache } from '../src/taches/depot.ts';
+import { appliquer, lireTache } from '../src/taches/depot.ts';
 import type { ClientAvis } from '../src/gardien/avis.ts';
 import { demarrerFausseApi, type FausseApi, type Tour } from '../test/outils/fausse-api.ts';
 
@@ -47,6 +47,8 @@ let image: string;
 let o: Orchestrateur;
 let api: FausseApi;
 let cle: Buffer;
+let tacheApi: string | undefined;
+const dossiersTemporaires: string[] = [];
 
 function depotPiege(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-piege-'));
@@ -93,6 +95,8 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     await api?.fermer();
     await docker.getVolume(nomRessource(T)).remove({ force: true }).catch(() => {});
     await docker.getVolume(`${nomRessource(T)}-controle`).remove({ force: true }).catch(() => {});
+    if (tacheApi) await docker.getVolume(nomRessource(tacheApi)).remove({ force: true }).catch(() => {});
+    for (const d of dossiersTemporaires) fs.rmSync(d, { recursive: true, force: true });
   });
 
   test('cadrage, validation, implémentation, review, patron, QA jusqu’à ma validation', async () => {
@@ -165,5 +169,38 @@ describe('Parcours complet d’une story avec des agents simulés', () => {
     const integrite = (await appel('/api/journal/integrite')).corps;
     assert.equal(integrite.intacte, true);
     assert.ok((integrite.entrees as number) > 0);
+  });
+
+  test('API du panneau : une tâche créée sur un projet relié prend chemin et budget du projet, jamais du corps', async () => {
+    const appel = async (chemin: string, corps: object) => {
+      const r = await fetch(`${o.urlUi}${chemin}`, {
+        method: 'POST', headers: { authorization: `Bearer ${o.jetonSession}`, 'content-type': 'application/json' }, body: JSON.stringify(corps),
+      });
+      return { statut: r.status, corps: await r.json() as Record<string, unknown> };
+    };
+    const depot = fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-projet-dotnet-'));
+    dossiersTemporaires.push(depot);
+    fs.cpSync(path.join(RACINE_DEPOT, 'test/fixtures/projet-dotnet'), depot, { recursive: true });
+    for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init']]) execFileSync('git', args, { cwd: depot });
+    const canonique = fs.realpathSync(depot);
+
+    const relie = await appel('/api/projets', { nom: 'Film API', chemin: depot, budgetUsd: 7.5, couvertureLignes: 70 });
+    assert.equal(relie.statut, 200, JSON.stringify(relie.corps));
+
+    const cree = await appel('/api/taches', { projet: 'Film API', titre: 'Export CSV', demande: 'Exporter en CSV', cheminProjet: '/etc', budgetUsd: 1e6, id: 'T-1' });
+    assert.equal(cree.statut, 200, JSON.stringify(cree.corps));
+    tacheApi = String(cree.corps.id);
+    assert.notEqual(tacheApi, 'T-1');
+    const t = lireTache(o.db, tacheApi);
+    assert.equal(t.projet, 'Film API');
+    assert.equal(t.cheminProjet, canonique);
+    assert.equal(t.budgetUsd, 7.5);
+    assert.equal(t.statut, 'prete');
+    assert.equal(cree.corps.cheminProjet, canonique);
+    assert.equal(cree.corps.budgetUsd, 7.5);
+    assert.equal(lireArtefact(o.db, cle, tacheApi, 'demande')?.contenu, 'Exporter en CSV');
+
+    // L'ordonnanceur est arrêté dans ce fichier : la tâche n'a jamais tourné ; elle est abandonnée, son espace retiré en fin de fichier.
+    appliquer(o.db, tacheApi, { type: 'abandon' });
   });
 });
