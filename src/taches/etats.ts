@@ -18,6 +18,7 @@ export type Evenement =
   | { type: 'reponse_cadrage' }
   | { type: 'validation_cadrage' }
   | { type: 'validation'; decision: 'branche' | 'pr' | 'renvoi' | 'abandon' }
+  | { type: 'relance'; vers: 'implementation' | 'cadrage' }
   | { type: 'abandon' };
 
 export const MAX_ECHANGES_PLAN = 2;
@@ -49,7 +50,16 @@ export function transition(e: EtatTache, ev: Evenement): EtatTache {
     case 'reprise':
       return e.statut === 'en_pause' || e.statut === 'bloquee' ? prete(e.etape) : refuser();
     case 'abandon':
-      return { ...e, statut: 'abandonnee', raison: null };
+      return e.statut === 'attente_humain' || e.statut === 'en_pause' || e.statut === 'bloquee' ? { ...e, statut: 'abandonnee', raison: null } : refuser();
+    case 'relance': {
+      if (e.statut === 'bloquee') return ev.vers === 'implementation' ? prete('implementation', { essaisQa: 0 }) : prete('cadrage', { essaisQa: 0, echangesPlan: 0 });
+      // Alerte d'intégrité : « compter comme no-go et relancer ».
+      if (e.statut !== 'en_pause' || !e.raison?.startsWith('integrite') || ev.vers !== 'implementation') return refuser();
+      const essaisQa = e.essaisQa + 1;
+      return essaisQa < MAX_ESSAIS_QA
+        ? prete('implementation', { essaisQa })
+        : { ...e, essaisQa, statut: 'bloquee', raison: `${MAX_ESSAIS_QA} no-go du QA : la tâche me revient` };
+    }
     case 'arbitrage':
       if (e.etape !== 'patron_plan' || e.statut !== 'attente_humain') refuser();
       return ev.choix === 'cadreur' ? prete('implementation') : prete('cadrage');

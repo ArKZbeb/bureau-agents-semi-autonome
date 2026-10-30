@@ -29,6 +29,14 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
     if (!a) throw new AnomalieIntegrite(type, `document manquant : ${type}`);
     return a.contenu;
   };
+  // Mon commentaire est transmis tant que l'agent visé n'a pas encore produit de nouveau document depuis.
+  const retourHumain = (vers: 'implementation' | 'cadrage', apres: TypeArtefact): string | null => {
+    const r = lireArtefact(db, cle, tache.id, 'retour_humain');
+    if (!r) return null;
+    const v = JSON.parse(r.contenu) as { vers: string; texte: string };
+    const dernier = lireArtefact(db, cle, tache.id, apres);
+    return v.vers === vers && (!dernier || dernier.id < r.id) ? v.texte : null;
+  };
   switch (tache.etape as EtapeAgent) {
     case 'cadrage': {
       const d: Record<string, string> = { demande: doc('demande') };
@@ -37,6 +45,8 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
       const p = lireProposition(db, tache.id);
       if (p) d.proposition_precedente = JSON.stringify(p);
       if (tache.echangesPlan > 0) d.avis_patron = doc('avis_patron');
+      const retourCadrage = retourHumain('cadrage', 'spec');
+      if (retourCadrage) d.retour_humain = retourCadrage;
       return d;
     }
     case 'patron_plan':
@@ -44,6 +54,14 @@ export function documentsEtape(db: Base, cle: Buffer, tache: Tache): Record<stri
     case 'implementation': {
       const d: Record<string, string> = { spec: doc('spec'), criteres: doc('criteres'), plan: doc('plan') };
       if (tache.essaisQa > 0) Object.assign(d, { verdict_qa: doc('verdict'), rapport_review: doc('rapport'), avis_patron_code: doc('avis_patron_code'), analyse: doc('analyse') });
+      const retourImpl = retourHumain('implementation', 'resume');
+      if (retourImpl) {
+        d.retour_humain = retourImpl;
+        for (const [cleDoc, type] of [['verdict_qa', 'verdict'], ['rapport_review', 'rapport'], ['avis_patron_code', 'avis_patron_code'], ['analyse', 'analyse']] as const) {
+          const a = lireArtefact(db, cle, tache.id, type);
+          if (a) d[cleDoc] = a.contenu;
+        }
+      }
       return d;
     }
     case 'review': {

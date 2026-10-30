@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ouvrirBase } from '../../src/db.ts';
 import { lireArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal, verifierJournal } from '../../src/integrite/journal.ts';
-import { arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, repondreCadreur, reprendre, validerCadrage } from '../../src/pipeline/actions.ts';
+import { abandonner, arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, relancer, renvoyer, repondreCadreur, reprendre, validerCadrage } from '../../src/pipeline/actions.ts';
 import { appliquer, creerTache, lireTache } from '../../src/taches/depot.ts';
 import { enregistrerProposition, listerEchanges, lireProposition } from '../../src/taches/echanges.ts';
 
@@ -108,4 +108,57 @@ test('budget : montant non fini refusé', () => {
   assert.throws(() => continuerBudget(db, cle, 'T-43', Infinity), /montant attendu/);
   assert.throws(() => continuerBudget(db, cle, 'T-43', NaN), /montant attendu/);
   assert.equal(lireTache(db, 'T-43').budgetUsd, 6);
+});
+
+const enValidation = (db: ReturnType<typeof tache>) => db.prepare("UPDATE taches SET etape = 'validation', statut = 'attente_humain', raison = 'en attente de ma validation', essais_qa = 2 WHERE id = 'T-43'").run();
+const bloquee = (db: ReturnType<typeof tache>) => db.prepare("UPDATE taches SET etape = 'qa', statut = 'bloquee', raison = '3 no-go du QA : la tâche me revient', essais_qa = 3 WHERE id = 'T-43'").run();
+
+test('renvoyer : retour humain signé, implémentation relancée', () => {
+  const db = tache();
+  enValidation(db);
+  const t = renvoyer(db, cle, 'T-43', '  Ajoute le test du cas vide ');
+  assert.deepEqual([t.etape, t.statut, t.essaisQa], ['implementation', 'prete', 0]);
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain')?.contenu, '{"vers":"implementation","texte":"Ajoute le test du cas vide"}');
+  const j = lireJournal(db, 'T-43').at(-1);
+  assert.deepEqual([j?.commande, j?.decideur], ['renvoi avec commentaire', 'Moi']);
+  verifierJournal(db, cle);
+});
+
+test('renvoyer : commentaire vide ou tâche hors validation = refus sans signature', () => {
+  const db = tache();
+  enValidation(db);
+  assert.throws(() => renvoyer(db, cle, 'T-43', '   '), new Error('commentaire requis'));
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain'), undefined);
+  const db2 = tache();
+  assert.throws(() => renvoyer(db2, cle, 'T-43', 'ok'), Error);
+  assert.equal(lireArtefact(db2, cle, 'T-43', 'retour_humain'), undefined);
+});
+
+test('relancer : avec ou sans commentaire, vers l’implémentation ou le cadrage', () => {
+  const db = tache();
+  bloquee(db);
+  const t = relancer(db, cle, 'T-43', 'implementation', 'Essaie autrement');
+  assert.deepEqual([t.etape, t.statut, t.essaisQa], ['implementation', 'prete', 0]);
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain')?.contenu, '{"vers":"implementation","texte":"Essaie autrement"}');
+  assert.equal(lireJournal(db, 'T-43').at(-1)?.commande, 'relance (implémentation)');
+  const db2 = tache();
+  bloquee(db2);
+  const t2 = relancer(db2, cle, 'T-43', 'cadrage', null);
+  assert.deepEqual([t2.etape, t2.statut], ['cadrage', 'prete']);
+  assert.equal(lireArtefact(db2, cle, 'T-43', 'retour_humain'), undefined);
+  assert.equal(lireJournal(db2, 'T-43').at(-1)?.commande, 'relance (cadrage)');
+});
+
+test('relancer : état invalide = erreur, rien de signé', () => {
+  const db = tache();
+  assert.throws(() => relancer(db, cle, 'T-43', 'implementation', 'Vas-y'), Error);
+  assert.equal(lireArtefact(db, cle, 'T-43', 'retour_humain'), undefined);
+});
+
+test('abandonner : depuis bloquée oui, depuis en cours non', () => {
+  const db = tache();
+  assert.throws(() => abandonner(db, cle, 'T-43'), Error);
+  bloquee(db);
+  assert.equal(abandonner(db, cle, 'T-43').statut, 'abandonnee');
+  assert.equal(lireJournal(db, 'T-43').at(-1)?.commande, 'abandon de la tâche');
 });

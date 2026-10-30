@@ -82,3 +82,30 @@ test('analyse : obligatoire à l’étape qa, facultative à l’étape review',
   const avant = tache('review', 0, 0, true);
   assert.ok(!('analyse' in documentsEtape(avant.db, cle, avant.t)), 'absente avant l’analyse, sans anomalie');
 });
+
+const retour = (db: ReturnType<typeof tache>['db'], vers: string, texte: string) => enregistrerArtefact(db, cle, 'T-41', 'retour_humain', JSON.stringify({ vers, texte }));
+
+test('implémentation : retour humain plus récent que le résumé transmis avec les rapports', () => {
+  const { db } = tache('implementation');
+  retour(db, 'implementation', 'Ajoute le test du cas vide');
+  const d = documentsEtape(db, cle, lireTache(db, 'T-41'));
+  assert.equal(d.retour_humain, 'Ajoute le test du cas vide');
+  assert.deepEqual([d.verdict_qa, d.rapport_review, d.avis_patron_code, d.analyse], ['{"verdict":"no_go"}', 'RAS', 'ok', '{"sha":"x"}']);
+});
+
+test('implémentation : retour humain plus ancien que le résumé non transmis', () => {
+  const { db } = tache('implementation');
+  retour(db, 'implementation', 'vieux');
+  enregistrerArtefact(db, cle, 'T-41', 'resume', 'refait');
+  assert.equal('retour_humain' in documentsEtape(db, cle, lireTache(db, 'T-41')), false);
+});
+
+test('cadrage : retour humain transmis seulement s’il vise le cadrage et suit la dernière spec', () => {
+  const { db } = tache('cadrage');
+  retour(db, 'implementation', 'pour l’implémenteur');
+  assert.equal('retour_humain' in documentsEtape(db, cle, lireTache(db, 'T-41')), false);
+  retour(db, 'cadrage', 'Revois le périmètre');
+  assert.equal(documentsEtape(db, cle, lireTache(db, 'T-41')).retour_humain, 'Revois le périmètre');
+  enregistrerArtefact(db, cle, 'T-41', 'spec', '# Spec 2');
+  assert.equal('retour_humain' in documentsEtape(db, cle, lireTache(db, 'T-41')), false);
+});

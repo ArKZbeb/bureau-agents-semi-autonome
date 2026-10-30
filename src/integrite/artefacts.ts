@@ -2,7 +2,7 @@ import { enTransaction, type Base } from '../db.ts';
 import { AnomalieIntegrite } from './anomalie.ts';
 import { hmac, hmacValide, sha256 } from './signature.ts';
 
-export type TypeArtefact = 'spec' | 'plan' | 'criteres' | 'rapport' | 'verdict' | 'demande' | 'avis_patron' | 'resume' | 'avis_patron_code' | 'analyse';
+export type TypeArtefact = 'spec' | 'plan' | 'criteres' | 'rapport' | 'verdict' | 'demande' | 'avis_patron' | 'resume' | 'avis_patron_code' | 'analyse' | 'retour_humain';
 export type Artefact = { id: number; tacheId: string; type: TypeArtefact; contenu: string; sha256: string; creeLe: string };
 
 type Ligne = { id: number; tache_id: string; type: TypeArtefact; contenu: string; sha256: string; hmac: string; cree_le: string };
@@ -58,6 +58,13 @@ export function lireArtefact(db: Base, cle: Buffer, tacheId: string, type: TypeA
   const artefact = derniere ? verifier(cle, derniere) : undefined;
   verifierType(db, cle, tacheId, type, lignes);
   return artefact;
+}
+
+export function listerArtefacts(db: Base, cle: Buffer, tacheId: string, type: TypeArtefact): Artefact[] {
+  const lignes = lignesDuType(db, tacheId, type);
+  const versions = lignes.map(l => verifier(cle, l));
+  verifierType(db, cle, tacheId, type, lignes);
+  return versions;
 }
 
 export function verifierArtefactsTache(db: Base, cle: Buffer, tacheId: string): void {

@@ -2,7 +2,7 @@ import type { Base } from '../db.ts';
 import { enregistrerArtefact } from '../integrite/artefacts.ts';
 import { ajouterAuJournal } from '../integrite/journal.ts';
 import { appliquer, augmenterBudget, listerTaches, lireTache, type Tache } from '../taches/depot.ts';
-import { RAISON_PROPOSITION } from '../taches/etats.ts';
+import { RAISON_PROPOSITION, transition } from '../taches/etats.ts';
 import { ajouterEchange, lireProposition, supprimerProposition } from '../taches/echanges.ts';
 import { numeroterCriteres } from './prompts.ts';
 
@@ -56,6 +56,38 @@ export function reprendre(db: Base, cle: Buffer, tacheId: string): Tache {
   if (!permis) throw new Error(`${tacheId} ne se reprend pas ainsi (${t.statut}${t.raison ? ` : ${t.raison}` : ''})`);
   const suite = appliquer(db, tacheId, { type: 'reprise' });
   journaliser(db, cle, tacheId, 'reprise de la tâche', t.raison ?? t.statut);
+  return suite;
+}
+
+const retour = (db: Base, cle: Buffer, tacheId: string, vers: 'implementation' | 'cadrage', texte: string) =>
+  enregistrerArtefact(db, cle, tacheId, 'retour_humain', JSON.stringify({ vers, texte }));
+
+export function renvoyer(db: Base, cle: Buffer, tacheId: string, commentaire: string): Tache {
+  const texte = commentaire.trim();
+  if (!texte) throw new Error('commentaire requis');
+  const t = lireTache(db, tacheId);
+  // État vérifié avant toute signature : un refus ne laisse aucun document signé.
+  if (t.etape !== 'validation' || t.statut !== 'attente_humain') throw new Error(`${tacheId} n’attend pas ma validation`);
+  retour(db, cle, tacheId, 'implementation', texte);
+  const suite = appliquer(db, tacheId, { type: 'validation', decision: 'renvoi' });
+  journaliser(db, cle, tacheId, 'renvoi avec commentaire', texte.slice(0, 200));
+  return suite;
+}
+
+export function relancer(db: Base, cle: Buffer, tacheId: string, vers: 'implementation' | 'cadrage', commentaire: string | null): Tache {
+  const t = lireTache(db, tacheId);
+  transition(t, { type: 'relance', vers }); // lève avant toute signature si la relance est impossible
+  const texte = commentaire?.trim();
+  if (texte) retour(db, cle, tacheId, vers, texte);
+  const suite = appliquer(db, tacheId, { type: 'relance', vers });
+  journaliser(db, cle, tacheId, `relance (${vers === 'implementation' ? 'implémentation' : 'cadrage'})`, texte?.slice(0, 200) || t.raison || t.statut);
+  return suite;
+}
+
+export function abandonner(db: Base, cle: Buffer, tacheId: string): Tache {
+  const t = lireTache(db, tacheId);
+  const suite = appliquer(db, tacheId, { type: 'abandon' });
+  journaliser(db, cle, tacheId, 'abandon de la tâche', t.raison ?? t.statut);
   return suite;
 }
 

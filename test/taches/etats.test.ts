@@ -78,3 +78,33 @@ test('transitions invalides refusées', () => {
   const finie: EtatTache = { ...initial, statut: 'terminee' };
   assert.throws(() => transition(finie, { type: 'abandon' }), TransitionInvalide);
 });
+
+test('relance depuis bloquée : implémentation ou cadrage, compteurs remis à zéro', () => {
+  const bloquee: EtatTache = { etape: 'qa', statut: 'bloquee', raison: '3 no-go du QA : la tâche me revient', echangesPlan: 1, essaisQa: 3 };
+  assert.deepEqual(transition(bloquee, { type: 'relance', vers: 'implementation' }), { ...bloquee, etape: 'implementation', statut: 'prete', raison: null, essaisQa: 0 });
+  assert.deepEqual(transition(bloquee, { type: 'relance', vers: 'cadrage' }), { ...bloquee, etape: 'cadrage', statut: 'prete', raison: null, essaisQa: 0, echangesPlan: 0 });
+});
+
+test('relance après une alerte d’intégrité : compte un no-go', () => {
+  const pause: EtatTache = { etape: 'qa', statut: 'en_pause', raison: 'integrite : la branche a changé', echangesPlan: 0, essaisQa: 1 };
+  assert.deepEqual(transition(pause, { type: 'relance', vers: 'implementation' }), { ...pause, etape: 'implementation', statut: 'prete', raison: null, essaisQa: 2 });
+  const derniere = { ...pause, essaisQa: 2 };
+  assert.deepEqual(transition(derniere, { type: 'relance', vers: 'implementation' }), { ...derniere, statut: 'bloquee', essaisQa: 3, raison: '3 no-go du QA : la tâche me revient' });
+  assert.throws(() => transition(pause, { type: 'relance', vers: 'cadrage' }), TransitionInvalide);
+});
+
+test('relance refusée hors blocage et hors alerte d’intégrité', () => {
+  for (const e of [
+    { etape: 'implementation', statut: 'en_cours', raison: null, echangesPlan: 0, essaisQa: 0 },
+    { etape: 'implementation', statut: 'en_pause', raison: 'budget : plafond', echangesPlan: 0, essaisQa: 0 },
+    { etape: 'validation', statut: 'attente_humain', raison: 'en attente de ma validation', echangesPlan: 0, essaisQa: 0 },
+  ] as EtatTache[]) assert.throws(() => transition(e, { type: 'relance', vers: 'implementation' }), TransitionInvalide);
+});
+
+test('abandon seulement quand aucun agent ne travaille', () => {
+  const base = { etape: 'implementation', raison: null, echangesPlan: 0, essaisQa: 0 } as const;
+  for (const statut of ['attente_humain', 'en_pause', 'bloquee'] as const)
+    assert.equal(transition({ ...base, statut }, { type: 'abandon' }).statut, 'abandonnee');
+  for (const statut of ['prete', 'en_cours'] as const)
+    assert.throws(() => transition({ ...base, statut }, { type: 'abandon' }), TransitionInvalide);
+});

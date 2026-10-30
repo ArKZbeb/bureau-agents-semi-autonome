@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ouvrirBase } from '../../src/db.ts';
-import { enregistrerArtefact, lireArtefact, verifierArtefactsTache, type TypeArtefact } from '../../src/integrite/artefacts.ts';
+import { enregistrerArtefact, lireArtefact, listerArtefacts, verifierArtefactsTache, type TypeArtefact } from '../../src/integrite/artefacts.ts';
 import { AnomalieIntegrite } from '../../src/integrite/anomalie.ts';
 import { sha256 } from '../../src/integrite/signature.ts';
 
@@ -83,4 +83,22 @@ test('registre d’artefact réécrit sans la clé = anomalie', () => {
   db.prepare('DELETE FROM artefacts WHERE id = ?').run(v2.id);
   db.prepare("UPDATE artefacts_tete SET nombre = 1, empreinte = ? WHERE tache_id = 'T-41' AND type = 'plan'").run(v1.sha256);
   assert.throws(() => lireArtefact(db, cle, 'T-41', 'plan'), AnomalieIntegrite);
+});
+
+test('listerArtefacts : toutes les versions vérifiées, dans l’ordre', () => {
+  const db = ouvrirBase(':memory:');
+  for (const v of ['v1', 'v2', 'v3']) enregistrerArtefact(db, cle, 'T-50', 'plan', v);
+  assert.deepEqual(listerArtefacts(db, cle, 'T-50', 'plan').map(a => a.contenu), ['v1', 'v2', 'v3']);
+  assert.deepEqual(listerArtefacts(db, cle, 'T-50', 'spec'), []);
+});
+
+test('listerArtefacts : version altérée ou supprimée = anomalie', () => {
+  const db = ouvrirBase(':memory:');
+  for (const v of ['v1', 'v2']) enregistrerArtefact(db, cle, 'T-51', 'plan', v);
+  db.prepare("UPDATE artefacts SET contenu = 'autre' WHERE contenu = 'v1'").run();
+  assert.throws(() => listerArtefacts(db, cle, 'T-51', 'plan'), AnomalieIntegrite);
+  const db2 = ouvrirBase(':memory:');
+  for (const v of ['v1', 'v2']) enregistrerArtefact(db2, cle, 'T-52', 'plan', v);
+  db2.prepare("DELETE FROM artefacts WHERE contenu = 'v2'").run();
+  assert.throws(() => listerArtefacts(db2, cle, 'T-52', 'plan'), AnomalieIntegrite);
 });
