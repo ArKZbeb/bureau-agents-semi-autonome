@@ -32,9 +32,9 @@ function commandeDe(e: Escalade): { commande: string | null; brut: string } {
           }
           <h3>Raison donnée par le gardien</h3>
           <p>{{ e.raison }}</p>
-          <input type="text" aria-label="Commentaire (facultatif)" placeholder="Commentaire (facultatif)" [value]="commentaire()" (input)="commentaire.set($any($event.target).value)" />
-          <button class="principal" [disabled]="envoi()" (click)="decider(e, 'approuver')">Autoriser</button>
-          <button class="danger" [disabled]="envoi()" (click)="decider(e, 'refuser')">Refuser</button>
+          <input type="text" aria-label="Commentaire (facultatif)" placeholder="Commentaire (facultatif)" [value]="commentaires()[e.id] ?? ''" (input)="saisir(e.id, $any($event.target).value)" />
+          <button class="principal" [disabled]="enCours().has(e.id)" (click)="decider(e, 'approuver')">Autoriser</button>
+          <button class="danger" [disabled]="enCours().has(e.id)" (click)="decider(e, 'refuser')">Refuser</button>
         </div>
       } @empty {
         <p class="doux">Aucune commande en attente.</p>
@@ -46,24 +46,26 @@ export class Securite {
   private readonly api = inject(ApiService);
   protected readonly etat = inject(EtatBureau);
   protected readonly heure = heure;
-  protected readonly commentaire = signal('');
-  protected readonly envoi = signal(false);
+  protected readonly commentaires = signal<Record<number, string>>({});
+  protected readonly enCours = signal<ReadonlySet<number>>(new Set());
   protected readonly message = signal<string | null>(null);
   protected readonly confirmation = signal<string | null>(null);
   protected readonly affichage = commandeDe;
 
+  protected saisir(id: number, texte: string): void { this.commentaires.update(c => ({ ...c, [id]: texte })); }
+
   protected async decider(e: Escalade, decision: 'approuver' | 'refuser'): Promise<void> {
-    if (this.envoi()) return;
-    this.envoi.set(true); this.message.set(null); this.confirmation.set(null);
+    if (this.enCours().has(e.id)) return;
+    this.enCours.update(s => new Set(s).add(e.id)); this.message.set(null); this.confirmation.set(null);
     try {
-      const t = await this.api.deciderEscalade(e.id, decision, this.commentaire());
+      const t = await this.api.deciderEscalade(e.id, decision, this.commentaires()[e.id] ?? '');
       this.confirmation.set(`Décision enregistrée : la tâche ${t.id} reprend (${t.statut}).`);
-      this.commentaire.set('');
+      this.commentaires.update(c => { const { [e.id]: _, ...reste } = c; return reste; });
+      await this.etat.rafraichir();
     } catch (err) {
       this.message.set((err as Error).message);
     } finally {
-      this.envoi.set(false);
+      this.enCours.update(s => { const n = new Set(s); n.delete(e.id); return n; });
     }
-    await this.etat.rafraichir();
   }
 }

@@ -91,4 +91,22 @@ describe('Securite', () => {
     expect(texte()).toContain('escalade 3 introuvable ou déjà tranchée');
     expect((bouton('Autoriser') as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('Bash : JSON invalide ou command non texte, entrée brute affichée', async () => {
+    const { texte, fx } = await ouvrir([esc({ id: 1, entree: '{pas json' }), esc({ id: 2, entree: '{"command":42}' })]);
+    await fx.whenStable();
+    expect(texte()).toContain('Bash {pas json');
+    expect(texte()).toContain('Bash {"command":42}');
+    expect(texte()).not.toContain('$ ');
+  });
+
+  it('commentaire propre à chaque escalade', async () => {
+    const { el, fx } = await ouvrir([esc({ id: 1 }), esc({ id: 2 })]);
+    const champs = el.querySelectorAll('input');
+    (champs[1] as HTMLInputElement).value = 'pour deux'; champs[1].dispatchEvent(new Event('input'));
+    [...el.querySelectorAll('button')].find(b => b.textContent!.trim() === 'Autoriser')!.click();
+    await fx.whenStable();
+    expect(api.deciderEscalade).toHaveBeenCalledWith(1, 'approuver', '');
+    expect((el.querySelectorAll('input')[1] as HTMLInputElement).value).toBe('pour deux');
+  });
 });

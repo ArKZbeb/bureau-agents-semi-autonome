@@ -87,4 +87,16 @@ describe('Journal', () => {
     vi.advanceTimersByTime(6000);
     expect(api.journal.mock.calls.length).toBe(n + 1);
   });
+
+  it('filtre Tâche réinitialisé quand la tâche disparaît du journal', async () => {
+    const { fx, el, lignes, choisir } = await ouvrir([entree(1), entree(2, { tacheId: 'T-42' })]);
+    await choisir('Tâche', 'T-42');
+    expect(lignes()).toHaveLength(1);
+    api.journal.mockResolvedValue([entree(1)]);
+    vi.advanceTimersByTime(3000);
+    await vi.waitFor(async () => { await fx.whenStable(); expect(el.querySelectorAll('select[aria-label="Tâche"] option')).toHaveLength(2); });
+    expect((el.querySelector('select[aria-label="Tâche"]') as HTMLSelectElement).value).toBe('');
+    expect(lignes()).toHaveLength(1);
+    expect(lignes()[0]).toContain('cmd 1');
+  });
 });

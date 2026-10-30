@@ -73,7 +73,9 @@ export class Journal implements OnDestroy {
     this.enCours = true;
     try {
       const [entrees, integrite] = await Promise.all([this.api.journal(), this.api.integrite()]);
-      this.entrees.set(entrees); this.integrite.set(integrite); this.erreur.set(null);
+      this.entrees.set(entrees);
+      if (this.filtreTache() && !entrees.some(x => x.tacheId === this.filtreTache())) this.filtreTache.set('');
+      this.integrite.set(integrite); this.erreur.set(null);
     } catch (e) {
       this.erreur.set((e as Error).message);
     } finally {

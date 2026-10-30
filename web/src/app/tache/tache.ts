@@ -1,7 +1,7 @@
 import { Component, OnDestroy, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../api';
-import { LIBELLE_ETAPE, budget, eur, essai, qui } from '../libelles';
+import { LIBELLE_ETAPE, budget, eur, essai, heure, qui } from '../libelles';
 import type { EntreeJournal, FicheTache, NomAction, Tache, TypeDocument } from '../modeles';
 import { RapportVue } from './rapport';
 
@@ -10,10 +10,6 @@ const DOCUMENTS: { type: TypeDocument; titre: string }[] = [
   { type: 'avis_patron', titre: 'Avis du patron' }, { type: 'resume', titre: "Résumé de l'implémenteur" }, { type: 'avis_patron_code', titre: 'Avis du patron sur le code' },
 ];
 const raisonDe = (t: Tache) => (t.raison ?? '').split(' : ')[0];
-const heure = (iso: string) => {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '--:--' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-};
 
 type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | 'escalade' | 'validation' | null;
 
