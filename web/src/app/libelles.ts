@@ -27,3 +27,8 @@ export function qui(t: Tache): string {
     default: return agent;
   }
 }
+
+export const heure = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '--:--' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};

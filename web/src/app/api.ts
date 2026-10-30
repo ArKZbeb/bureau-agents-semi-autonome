@@ -29,7 +29,7 @@ export class ApiService {
   detecter(chemin: string) { return this.post<Detection>('/api/projets/detection', { chemin }); }
   relier(p: { nom: string; chemin: string; budgetUsd: number; couvertureLignes: number }) { return this.post<Projet>('/api/projets', p); }
   escalades() { return this.get<Escalade[]>('/api/escalades'); }
-  deciderEscalade(id: number, decision: 'approuver' | 'refuser', commentaire: string) { return this.post<unknown>(`/api/escalades/${String(id)}`, { decision, commentaire }); }
+  deciderEscalade(id: number, decision: 'approuver' | 'refuser', commentaire: string) { return this.post<Tache>(`/api/escalades/${String(id)}`, { decision, commentaire }); }
   journal(tacheId?: string) { return this.get<EntreeJournal[]>(tacheId ? `/api/journal?tache=${encodeURIComponent(tacheId)}` : '/api/journal'); }
   integrite() { return this.get<IntegriteJournal>('/api/journal/integrite'); }
   etat() { return this.get<EtatGlobal>('/api/etat'); }
