@@ -92,7 +92,7 @@ export function demultiplexer(brut: Buffer): { stdout: Buffer; stderr: Buffer } 
 }
 
 /** Conteneur jetable, sans réseau, pour les opérations de l'orchestrateur sur un volume. */
-async function executerJetable(docker: Docker, imageId: string, cmd: string[], montages: Docker.MountConfig): Promise<{ code: number; stdout: Buffer; stderr: Buffer }> {
+export async function executerJetable(docker: Docker, imageId: string, cmd: string[], montages: Docker.MountConfig): Promise<{ code: number; stdout: Buffer; stderr: Buffer }> {
   const c = await docker.createContainer({
     Image: imageId, User: 'node', Cmd: cmd, Labels: { [LABEL_TACHE]: 'jetable' },
     HostConfig: { ...DURCISSEMENT, NetworkMode: 'none', Memory: 256 * 1024 ** 2, PidsLimit: 64, Tmpfs: { '/tmp': 'rw,nosuid,size=64m' }, Mounts: montages },
