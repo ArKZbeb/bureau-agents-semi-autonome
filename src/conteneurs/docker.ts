@@ -21,7 +21,7 @@ const DURCISSEMENT = { ReadonlyRootfs: true, CapDrop: ['ALL'], SecurityOpt: ['no
 export const nomRessource = (tacheId: string) => `bureau-${tacheId.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
 export const brancheTache = (tacheId: string) => `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
 export const nomCopie = (tacheId: string) => `${nomRessource(tacheId)}-controle`;
-const codeHttp = (e: unknown) => (e as { statusCode?: number }).statusCode;
+export const codeHttp = (e: unknown) => (e as { statusCode?: number }).statusCode;
 
 export async function verifierDocker(docker: Docker): Promise<void> {
   try {

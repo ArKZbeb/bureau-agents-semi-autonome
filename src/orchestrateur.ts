@@ -7,11 +7,12 @@ import type http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config.ts';
 import {
-  arreterConteneurs, assurerPasserelle, lireFichierConteneur, lireShaVolume, lireFichierVolume, lireFichierVolumeControle, nomCopie, nomRessource, preparerCopieControle, preparerEspace,
+  arreterConteneurs, assurerPasserelle, codeHttp, lireFichierConteneur, lireShaVolume, lireFichierVolume, lireFichierVolumeControle, nomCopie, nomRessource, preparerCopieControle, preparerEspace,
   resoudreCheminConteneur, supprimerCopieControle, resoudreCheminVolume,
   verifierDocker, verifierImage,
 } from './conteneurs/docker.ts';
-import { executerAnalyse } from './analyse/execution.ts';
+import { executerAnalyse, nomVolumeMesures } from './analyse/execution.ts';
+import { lireBundle, lireValidation } from './conteneurs/validation.ts';
 import { lancerEtape, type Agent, type DepsExecution, type ResultatEtape } from './conteneurs/execution.ts';
 import { ouvrirBase, type Base } from './db.ts';
 import { demanderAvis, type ClientAvis } from './gardien/avis.ts';
@@ -23,7 +24,7 @@ import { chargerOuCreerCle } from './integrite/cle.ts';
 import { ajouterAuJournal, lireJournal, verifierJournal, type NouvelleEntree } from './integrite/journal.ts';
 import { verifierManifeste } from './integrite/manifeste.ts';
 import {
-  arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, repondreCadreur, reprendre, validerCadrage,
+  abandonner, arbitrer, continuerBudget, journaliserRepriseGlobale, pauserPourArretGlobal, relancer, renvoyer, repondreCadreur, reprendre, validerCadrage,
 } from './pipeline/actions.ts';
 import { demanderControle } from './pipeline/controleur.ts';
 import { creerOrdonnanceur } from './pipeline/ordonnanceur.ts';
@@ -37,6 +38,8 @@ import { creerServeurUi } from './reseau/serveur-ui.ts';
 import { appliquer, creerTache, definirCommitBase, listerTaches, lireTache, reprendreApresRedemarrage, type NouvelleTache, type Tache } from './taches/depot.ts';
 import { detecterProjet, lireProjet, listerProjets, relierProjet } from './taches/projets.ts';
 import { listerEchanges, lireProposition } from './taches/echanges.ts';
+import { executerHote } from './validation/depot-hote.ts';
+import { dossierValidation, historique, ouvrirPullRequest, recupererBranche, type DepsValidation } from './validation/service.ts';
 
 export type OptionsOrchestrateur = {
   config: Config; racineDepot: string; docker?: Docker; clientAvis?: ClientAvis; fetchDependances?: typeof fetch;
@@ -167,6 +170,27 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     return tache;
   };
 
+  const depsValidation: DepsValidation = {
+    db, cle, executer: executerHote,
+    lire: (volume, base, sha) => lireValidation(docker, manifeste.image, volume, base, sha),
+    bundle: (volume, tacheId, base, sha) => lireBundle(docker, manifeste.image, volume, tacheId, base, sha),
+    supprimerVolumes: async tacheId => {
+      for (const v of [nomRessource(tacheId), nomVolumeMesures(tacheId), nomCopie(tacheId)])
+        await docker.getVolume(v).remove({ force: true }).catch((e: unknown) => { if (codeHttp(e) !== 404) throw e; });
+    },
+  };
+  // Abandon : la tâche est close d'abord ; conteneurs et volumes sont ensuite retirés, un échec de nettoyage est journalisé seulement.
+  const abandonnerTache = async (id: string) => {
+    const t = abandonner(db, cle, id);
+    try {
+      await arreterConteneurs(docker, id);
+      await depsValidation.supprimerVolumes(id);
+    } catch (e) {
+      journaliser({ tacheId: id, type: 'evenement', commande: 'nettoyage après abandon', couche: '—', decision: 'Erreur', decideur: 'Orchestrateur', raison: (e as Error).message.slice(0, 200) });
+    }
+    return t;
+  };
+
   const jetonSession = randomBytes(24).toString('base64url');
   const serveurUi = creerServeurUi(jetonSession, {
     taches: () => listerTaches(db),
@@ -216,8 +240,18 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
         return arbitrer(db, cle, id, c.choix);
       }
       if (nom === 'budget') return continuerBudget(db, cle, id, Number(c.montantUsd));
+      if (nom === 'recuperation') return recupererBranche(depsValidation, id);
+      if (nom === 'pr') return ouvrirPullRequest(depsValidation, id);
+      if (nom === 'renvoi') return renvoyer(db, cle, id, String(c.commentaire));
+      if (nom === 'relance') {
+        if (c.vers !== 'implementation' && c.vers !== 'cadrage') throw new Error('vers attendu : implementation ou cadrage');
+        return relancer(db, cle, id, c.vers, typeof c.commentaire === 'string' ? c.commentaire : null);
+      }
+      if (nom === 'abandon') return abandonnerTache(id);
       return reprendre(db, cle, id);
     },
+    validation: id => dossierValidation(depsValidation, id),
+    historique: id => historique(depsValidation, id),
   }, chargerPanneau(path.join(o.racineDepot, 'web', 'dist', 'web', 'browser')));
   // Le serveur des conteneurs écoute sur 127.0.0.1 et sur la passerelle du pont Docker (jamais 0.0.0.0) : sous Linux, host.docker.internal y mène.
   const passerelleBridge = await docker.getNetwork('bridge').inspect().then(

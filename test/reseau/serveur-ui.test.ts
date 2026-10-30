@@ -28,7 +28,14 @@ async function monter(panneau: Map<string, FichierPanneau> | null = null) {
     integriteJournal: () => ({ intacte: true, entrees: 3 }),
     tache: id => (id === 'T-41' ? { id } : null),
     creerTache: async t => { if (t.projet === 'Inconnu') throw new Error('projet non relié : Inconnu'); creations.push(t); return { id: 'T-42', ...t }; },
-    action: (id, nom, corps) => { if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi'); actions.push([id, nom, corps]); return { ok: true }; },
+    action: (id, nom, corps) => {
+      if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi');
+      if (id === 'T-98') return Promise.reject(new Error('récupération refusée : la branche a changé depuis l’analyse'));
+      actions.push([id, nom, corps]);
+      return nom === 'pr' ? Promise.resolve({ url: 'https://github.com/moi/addiff/pull/7' }) : { ok: true };
+    },
+    validation: id => { if (id === 'T-99') throw new Error('T-99 n’attend pas ma validation'); return Promise.resolve({ branche: 'task/41', id }); },
+    historique: id => { if (id === 'T-99') throw new Error('verdict de T-99 : signature invalide'); return [{ verdict: 'go', id }]; },
   }, panneau);
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
   const adresse = serveur.address() as net.AddressInfo;
@@ -228,6 +235,50 @@ test('escalade déjà tranchée : 409 avec le message, comme les autres actions'
   const m = await monter();
   try {
     assert.deepEqual(await m.appeler('/api/escalades/9', { methode: 'POST', corps: { decision: 'approuver' } }), { statut: 409, corps: { erreur: 'escalade 9 déjà tranchée' } });
+  } finally {
+    m.fermer();
+  }
+});
+
+test('bureau de validation : dossier et historique (200, 409)', async () => {
+  const m = await monter();
+  try {
+    assert.deepEqual(await m.appeler('/api/taches/T-41/validation'), { statut: 200, corps: { branche: 'task/41', id: 'T-41' } });
+    assert.deepEqual(await m.appeler('/api/taches/T-41/historique'), { statut: 200, corps: [{ verdict: 'go', id: 'T-41' }] });
+    assert.deepEqual(await m.appeler('/api/taches/T-99/validation'), { statut: 409, corps: { erreur: 'T-99 n’attend pas ma validation' } });
+    assert.deepEqual(await m.appeler('/api/taches/T-99/historique'), { statut: 409, corps: { erreur: 'verdict de T-99 : signature invalide' } });
+    for (const chemin of ['/api/taches/T-41/validation', '/api/taches/T-41/historique'])
+      assert.equal((await m.appeler(chemin, { entetes: { authorization: 'Bearer faux' } })).statut, 401);
+  } finally {
+    m.fermer();
+  }
+});
+
+test('bureau de validation : récupération, PR, renvoi, relance, abandon transmis ; corps contrôlés', async () => {
+  const m = await monter();
+  try {
+    assert.deepEqual(await m.appeler('/api/taches/T-41/recuperation', { methode: 'POST', corps: {} }), { statut: 200, corps: { ok: true } });
+    assert.deepEqual(await m.appeler('/api/taches/T-41/pr', { methode: 'POST', corps: {} }), { statut: 200, corps: { url: 'https://github.com/moi/addiff/pull/7' } });
+    assert.equal((await m.appeler('/api/taches/T-41/renvoi', { methode: 'POST', corps: { commentaire: 'Les remises manquent' } })).statut, 200);
+    assert.equal((await m.appeler('/api/taches/T-41/relance', { methode: 'POST', corps: { vers: 'cadrage', commentaire: 'Revoir la spec' } })).statut, 200);
+    assert.equal((await m.appeler('/api/taches/T-41/relance', { methode: 'POST', corps: { vers: 'implementation' } })).statut, 200);
+    assert.equal((await m.appeler('/api/taches/T-41/abandon', { methode: 'POST', corps: {} })).statut, 200);
+    assert.deepEqual(m.actions, [
+      ['T-41', 'recuperation', {}], ['T-41', 'pr', {}], ['T-41', 'renvoi', { commentaire: 'Les remises manquent' }],
+      ['T-41', 'relance', { vers: 'cadrage', commentaire: 'Revoir la spec' }], ['T-41', 'relance', { vers: 'implementation' }], ['T-41', 'abandon', {}],
+    ]);
+    for (const corps of [{}, { vers: 'qa' }, { vers: 3 }])
+      assert.equal((await m.appeler('/api/taches/T-41/relance', { methode: 'POST', corps })).statut, 400);
+    for (const corps of [{}, { commentaire: '  ' }, { commentaire: 5 }])
+      assert.equal((await m.appeler('/api/taches/T-41/renvoi', { methode: 'POST', corps })).statut, 400);
+    assert.equal(m.actions.length, 6, 'aucun corps refusé n’a atteint l’action');
+    assert.deepEqual(await m.appeler('/api/taches/T-98/recuperation', { methode: 'POST', corps: {} }),
+      { statut: 409, corps: { erreur: 'récupération refusée : la branche a changé depuis l’analyse' } });
+    for (const nom of ['recuperation', 'pr', 'renvoi', 'relance', 'abandon']) {
+      assert.equal((await m.appeler(`/api/taches/T-41/${nom}`, { methode: 'POST', corps: { commentaire: 'x', vers: 'cadrage' }, entetes: { authorization: 'Bearer faux' } })).statut, 401);
+      assert.equal((await m.appeler(`/api/taches/T-41/${nom}`, { methode: 'POST', corps: { commentaire: 'x', vers: 'cadrage' }, entetes: { origin: 'https://evil.example' } })).statut, 403);
+    }
+    assert.equal(m.actions.length, 6, 'rien sans jeton ni origine valides');
   } finally {
     m.fermer();
   }

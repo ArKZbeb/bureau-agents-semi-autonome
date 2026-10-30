@@ -6,12 +6,19 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import Docker from 'dockerode';
 import { construireImage } from '../src/conteneurs/image.ts';
-import { brancheTache, executerJetable, lireShaVolume, nomRessource, preparerEspace, RACINE_PROJET } from '../src/conteneurs/docker.ts';
+import { brancheTache, codeHttp, executerJetable, lireShaVolume, nomCopie, nomRessource, preparerEspace, RACINE_PROJET } from '../src/conteneurs/docker.ts';
 import { lireBundle, lireValidation, PLAFOND_DIFF } from '../src/conteneurs/validation.ts';
+import { nomVolumeMesures } from '../src/analyse/execution.ts';
+import { ouvrirBase } from '../src/db.ts';
+import { enregistrerArtefact } from '../src/integrite/artefacts.ts';
+import { lireJournal } from '../src/integrite/journal.ts';
+import { creerTache, definirCommitBase } from '../src/taches/depot.ts';
+import { executerHote } from '../src/validation/depot-hote.ts';
+import { recupererBranche } from '../src/validation/service.ts';
 
 const docker = new Docker();
-const NOMS = ['T-991', 'T-992', 'T-993', 'T-994'];
-const [T, PIEGE, GROS, GRAPHE] = NOMS;
+const NOMS = ['T-991', 'T-992', 'T-993', 'T-994', 'T-995'];
+const [T, PIEGE, GROS, GRAPHE, RECUP] = NOMS;
 let image: string;
 let depot: string;
 let tmp: string;
@@ -173,4 +180,30 @@ test('lireValidation : diff au-delà du plafond tronqué, sans caractère coupé
   assert.equal(l.tronque, true);
   assert.ok(l.diff.length <= PLAFOND_DIFF);
   assert.ok(!l.diff.includes('\uFFFD'));
+});
+
+test('recupererBranche : la pointe analysée arrive dans mon dépôt, le volume de la tâche est supprimé', async () => {
+  const { volume, base, pointe } = await espace(RECUP, [`echo r > r.txt && git add r.txt && git commit -qm un`, `echo s >> r.txt && git commit -qam deux`]);
+  const db = ouvrirBase(':memory:');
+  const cle = Buffer.alloc(32, 3);
+  creerTache(db, { id: RECUP, projet: 'Test', titre: 'Récupération', cheminProjet: depot, budgetUsd: 1 });
+  definirCommitBase(db, RECUP, base);
+  enregistrerArtefact(db, cle, RECUP, 'criteres', '1. r.txt existe\n');
+  enregistrerArtefact(db, cle, RECUP, 'analyse', JSON.stringify({ sha: pointe, base, outils: {} }));
+  db.prepare(`UPDATE taches SET etape = 'validation', statut = 'attente_humain' WHERE id = ?`).run(RECUP);
+  const avant = execFileSync('git', ['-C', depot, 'rev-parse', 'HEAD']).toString().trim();
+  const t = await recupererBranche({
+    db, cle, executer: executerHote,
+    lire: (v, b, s) => lireValidation(docker, image, v, b, s),
+    bundle: (v, id, b, s) => lireBundle(docker, image, v, id, b, s),
+    supprimerVolumes: async id => {
+      for (const v of [nomRessource(id), nomVolumeMesures(id), nomCopie(id)])
+        await docker.getVolume(v).remove({ force: true }).catch((e: unknown) => { if (codeHttp(e) !== 404) throw e; });
+    },
+  }, RECUP);
+  assert.equal(t.statut, 'terminee');
+  assert.equal(execFileSync('git', ['-C', depot, 'rev-parse', brancheTache(RECUP)]).toString().trim(), pointe);
+  assert.equal(execFileSync('git', ['-C', depot, 'rev-parse', 'HEAD']).toString().trim(), avant, 'branche courante intacte');
+  assert.equal(lireJournal(db, RECUP).at(-1)?.decision, 'Autorisé');
+  await assert.rejects(docker.getVolume(volume).inspect(), (e: unknown) => codeHttp(e) === 404);
 });

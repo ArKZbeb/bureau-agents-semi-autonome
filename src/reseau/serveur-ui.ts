@@ -21,10 +21,13 @@ export type RoutesUi = {
   tache: (id: string) => unknown;
   creerTache: (t: { projet: string; titre: string; demande: string }) => Promise<unknown>;
   action: (id: string, nom: NomAction, corps: Record<string, unknown>) => unknown;
+  /** Dossier du bureau de validation (diff, fichiers, intégrité, compteurs du journal). */
+  validation: (id: string) => Promise<unknown>;
+  historique: (id: string) => unknown;
 };
 
-export type NomAction = 'reponse' | 'validation-cadrage' | 'arbitrage' | 'budget' | 'reprise';
-const ACTIONS = new Set<string>(['reponse', 'validation-cadrage', 'arbitrage', 'budget', 'reprise']);
+export type NomAction = 'reponse' | 'validation-cadrage' | 'arbitrage' | 'budget' | 'reprise' | 'recuperation' | 'pr' | 'renvoi' | 'relance' | 'abandon';
+const ACTIONS = new Set<string>(['reponse', 'validation-cadrage', 'arbitrage', 'budget', 'reprise', 'recuperation', 'pr', 'renvoi', 'relance', 'abandon']);
 
 async function lireObjet(req: http.IncomingMessage): Promise<Record<string, unknown> | null> {
   try {
@@ -120,15 +123,18 @@ async function traiter(jeton: string, routes: RoutesUi, panneau: Map<string, Fic
     const t = routes.tache(fiche[1]);
     return t ? repondreJson(res, 200, t) : repondreJson(res, 404, { erreur: 'tâche introuvable' });
   }
+  const lecture = /^\/api\/taches\/(T-\d+)\/(validation|historique)$/.exec(url.pathname);
+  if (req.method === 'GET' && lecture) {
+    const id = lecture[1];
+    return conflit(res, () => (lecture[2] === 'validation' ? routes.validation(id) : routes.historique(id)));
+  }
   const action = /^\/api\/taches\/(T-\d+)\/([a-z-]+)$/.exec(url.pathname);
   if (req.method === 'POST' && action && ACTIONS.has(action[2])) {
     const c = await lireObjet(req);
     if (!c) return repondreJson(res, 400, { erreur: 'corps JSON invalide' });
-    try {
-      return repondreJson(res, 200, routes.action(action[1], action[2] as NomAction, c));
-    } catch (e) {
-      return repondreJson(res, 409, { erreur: (e as Error).message });
-    }
+    if (action[2] === 'renvoi' && !texte(c.commentaire)) return repondreJson(res, 400, { erreur: 'attendu : commentaire' });
+    if (action[2] === 'relance' && c.vers !== 'implementation' && c.vers !== 'cadrage') return repondreJson(res, 400, { erreur: 'vers attendu : implementation ou cadrage' });
+    return conflit(res, () => routes.action(action[1], action[2] as NomAction, c));
   }
   if (req.method === 'POST' && url.pathname === '/api/arret-global') return repondreJson(res, 200, await routes.arretGlobal());
   if (req.method === 'POST' && url.pathname === '/api/reprise-globale') return repondreJson(res, 200, routes.repriseGlobale());

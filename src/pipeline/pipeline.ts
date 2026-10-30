@@ -33,7 +33,7 @@ export type DepsPipeline = {
 
 const SHA_VALIDE = /^[0-9a-f]{40}$/;
 
-function lireAnalyse(db: Base, cle: Buffer, tacheId: string): Analyse {
+export function lireAnalyse(db: Base, cle: Buffer, tacheId: string): Analyse {
   const a = lireArtefact(db, cle, tacheId, 'analyse');
   if (!a) throw new AnomalieIntegrite('analyse', 'document manquant : analyse');
   // Contenu signé mais de forme inattendue : anomalie (pause d'intégrité), pas une erreur générique.
