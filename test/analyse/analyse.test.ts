@@ -11,7 +11,7 @@ const dotnetSeul = (): Record<string, string | null> => ({
   sha: `${SHA}\n`, 'diff.patch': DIFF,
   'tests_dotnet.code': '1\n', 'dotnet.trx': '<Counters total="5" failed="1" />', 'dotnet.cobertura.xml': COB,
   'audit_dotnet.code': '0', 'dotnet-vulnerables.json': JSON.stringify({ projects: [] }),
-  'tests_angular.na': '', 'audit_npm.na': '',
+  'tests_angular.na': '', 'stack_angular.na': '', 'audit_npm.na': '',
   'semgrep.code': '0', 'semgrep.json': '{"results":[]}',
   'gitleaks.code': '0', 'gitleaks.json': '[]',
 });
@@ -36,7 +36,7 @@ test('outil sans résultat : absent ; rapport illisible : absent', () => {
 });
 
 test('aucune stack de tests : couverture non applicable', () => {
-  const a = assemblerAnalyse(BASE, { sha: SHA, 'diff.patch': '', 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.na': '', 'audit_npm.na': '', 'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]' });
+  const a = assemblerAnalyse(BASE, { sha: SHA, 'diff.patch': '', 'stack_dotnet.na': '', 'stack_angular.na': '', 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.na': '', 'audit_npm.na': '', 'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]' });
   assert.equal(a.outils.couverture, 'non_applicable');
   assert.equal(a.couverture, null);
 });
@@ -89,7 +89,7 @@ test('Semgrep, gitleaks et audits en erreur (code non nul) : absent même avec u
 });
 
 test('Angular seul : tests ok et couverture lue dans angular.cobertura.xml', () => {
-  const f: Record<string, string | null> = { sha: SHA, 'diff.patch': DIFF, 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.code': '0', 'angular.cobertura.xml': COB, 'audit_npm.code': '0', 'npm-audit.json': '{"vulnerabilities":{}}', 'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]' };
+  const f: Record<string, string | null> = { sha: SHA, 'diff.patch': DIFF, 'stack_dotnet.na': '', 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.code': '0', 'angular.cobertura.xml': COB, 'audit_npm.code': '0', 'npm-audit.json': '{"vulnerabilities":{}}', 'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]' };
   const a = assemblerAnalyse(BASE, f);
   assert.equal(a.outils.tests_angular, 'ok');
   assert.equal(a.outils.audit_npm, 'ok');
@@ -162,8 +162,29 @@ test('sans source modifiée ou sans stack testée : aucun signalement de couvert
   doc['diff.patch'] = ajout('README.md') + ajout('tests/FilmTests.cs');
   assert.deepEqual(assemblerAnalyse(BASE, doc).signalements, []);
   const rien: Record<string, string | null> = {
-    sha: SHA, 'diff.patch': ajout('src/Autre.cs'), 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.na': '', 'audit_npm.na': '',
+    sha: SHA, 'diff.patch': ajout('src/Autre.cs'), 'stack_dotnet.na': '', 'stack_angular.na': '', 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.na': '', 'audit_npm.na': '',
     'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]',
   };
   assert.deepEqual(assemblerAnalyse(BASE, rien).signalements, []);
+});
+
+test('non-applicabilité des tests décidée par mesurer.sh : un .na de tester.sh qui la contredit = absent', () => {
+  // tester.sh exécute le code du dépôt, qui peut écrire tests_angular.na pour échapper à ng test.
+  const f = dotnetSeul();
+  delete f['stack_angular.na'];
+  const a = assemblerAnalyse(BASE, f);
+  assert.equal(a.outils.tests_angular, 'absent');
+  assert.equal(a.outils.couverture, 'ok', 'la couverture suit les stacks testées');
+
+  const g: Record<string, string | null> = { ...dotnetSeul(), 'tests_dotnet.na': '', 'audit_dotnet.na': '' };
+  for (const k of ['tests_dotnet.code', 'audit_dotnet.code']) delete g[k];
+  const b = assemblerAnalyse(BASE, g);
+  assert.equal(b.outils.tests_dotnet, 'absent');
+  assert.equal(b.outils.audit_dotnet, 'absent');
+  assert.equal(b.outils.couverture, 'absent');
+  assert.equal(assemblerAnalyse(BASE, { ...g, 'stack_dotnet.na': '' }).outils.tests_dotnet, 'non_applicable');
+});
+
+test('fichiers d’applicabilité des stacks relus dans les mesures', () => {
+  for (const f of ['stack_dotnet.na', 'stack_angular.na']) assert.ok(FICHIERS_MESURES.includes(f), f);
 });

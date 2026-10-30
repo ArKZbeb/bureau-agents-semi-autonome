@@ -40,6 +40,13 @@ cible_unique() {
   CIBLE=${lignes[0]#* }
 }
 
+# Applicabilité des stacks de tests, décidée ici sur le dépôt intact (mêmes règles que tester.sh) : tester.sh exécute
+# le code du dépôt, qui pourrait écrire un .na ; l'orchestrateur ne retient ce .na que si la stack est absente ici aussi.
+cible_unique -name '*.sln' -o -name '*.slnx'; ETAT=$?
+[ $ETAT -eq 1 ] && { cible_unique -name '*.csproj'; ETAT=$?; }
+[ $ETAT -eq 1 ] && : > "$SORTIE/stack_dotnet.na"
+cible_unique -name angular.json; [ $? -eq 1 ] && : > "$SORTIE/stack_angular.na"
+
 # npm audit du projet Angular : package.json et package-lock.json seuls, copiés dans un dossier vide (aucun .npmrc
 # ni autre fichier du dépôt : package-lock=false ou workspace= changeraient l'arbre audité), sans npm ci ni script.
 cible_unique -name angular.json

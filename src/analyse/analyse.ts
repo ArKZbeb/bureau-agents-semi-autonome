@@ -17,7 +17,7 @@ export const LIBELLES_OUTILS: Record<NomOutil | 'couverture', string> = {
 };
 
 // Fichiers de /mesures (mesurer.sh) puis de /workspace/analyse (tester.sh) à relire.
-export const FICHIERS_MESURES = ['sha', 'diff.patch', ...['audit_npm', 'semgrep', 'gitleaks'].flatMap(o => [`${o}.code`, `${o}.na`]), 'npm-audit.json', 'semgrep.json', 'gitleaks.json'];
+export const FICHIERS_MESURES = ['sha', 'diff.patch', 'stack_dotnet.na', 'stack_angular.na', ...['audit_npm', 'semgrep', 'gitleaks'].flatMap(o => [`${o}.code`, `${o}.na`]), 'npm-audit.json', 'semgrep.json', 'gitleaks.json'];
 export const FICHIERS_TESTS = [
   ...['tests_dotnet', 'audit_dotnet', 'tests_angular'].flatMap(o => [`${o}.code`, `${o}.na`]),
   'dotnet.trx', 'dotnet.cobertura.xml', 'dotnet-vulnerables.json', 'angular.cobertura.xml',
@@ -34,10 +34,19 @@ const RAPPORTS: Partial<Record<NomOutil, [string, (t: string) => Constat[] | nul
 
 const aTourne = (s: StatutOutil) => s === 'ok' || s === 'echec';
 
+// Outils de tester.sh dont la non-applicabilité doit être confirmée par mesurer.sh (stack absente du dépôt) :
+// tester.sh exécute le code du dépôt, qui peut écrire un .na pour échapper à une mesure.
+const STACK: Partial<Record<NomOutil, string>> = {
+  tests_dotnet: 'stack_dotnet.na', audit_dotnet: 'stack_dotnet.na', tests_angular: 'stack_angular.na',
+};
+
 export function assemblerAnalyse(base: string, fichiers: Record<string, string | null>): Analyse {
   const lu = (nom: string) => fichiers[nom] ?? null;
   const statut = (o: NomOutil): StatutOutil => {
-    if (lu(`${o}.na`) !== null) return 'non_applicable';
+    if (lu(`${o}.na`) !== null) {
+      const stack = STACK[o];
+      return stack === undefined || lu(stack) !== null ? 'non_applicable' : 'absent';
+    }
     const code = lu(`${o}.code`);
     if (code === null || !/^\s*\d+\s*$/.test(code)) return 'absent';
     if (Number(code) === MESURE_IMPOSSIBLE) return 'absent';
