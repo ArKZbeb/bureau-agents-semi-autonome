@@ -21,6 +21,10 @@ function sections(diff: string): string[][] {
   return res;
 }
 
+// Fin de ligne CRLF (courante sur les dépôts .NET) : un seul \r final par ligne est retiré avant `commandeVisible` ;
+// tout autre \r (au milieu, ou en plus du CRLF) reste marqué et déclenche le bandeau.
+const sansCr = (l: string) => (l.endsWith('\r') ? l.slice(0, -1) : l);
+
 /** Le diff est une donnée hostile : chaque ligne passe par `commandeVisible`, rendue par interpolation seule. */
 @Component({
   selector: 'app-diff',
@@ -63,13 +67,13 @@ export class DiffVue {
       // numstat et diff viennent des mêmes options git : le i-ème fichier est la i-ème section (renommages et noms cités compris).
       brutes = sections(diff).filter(s => s[0].startsWith('diff --git '))[choisi] ?? [];
     }
-    return brutes.map(l => ({ texte: commandeVisible(l).texte, classe: classeDe(l) }));
+    return brutes.map(l => ({ texte: commandeVisible(sansCr(l)).texte, classe: classeDe(l) }));
   });
   protected readonly sectionAbsente = computed(() => {
     const c = this.choisi();
     return c !== null && sections(this.donnees().diff).filter(s => s[0].startsWith('diff --git ')).length <= c;
   });
-  protected readonly suspecte = computed(() => this.donnees().diff.split('\n').some(l => commandeVisible(l).suspecte)
+  protected readonly suspecte = computed(() => this.donnees().diff.split('\n').some(l => commandeVisible(sansCr(l)).suspecte)
     || this.donnees().fichiers.some(f => commandeVisible(f.fichier).suspecte));
 
   protected choisir(i: number) { this.choisi.set(this.choisi() === i ? null : i); }

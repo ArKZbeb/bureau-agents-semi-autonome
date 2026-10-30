@@ -131,4 +131,34 @@ describe('ValidationVue', () => {
     expect(api.validation).toHaveBeenCalledTimes(2);
     expect(texte()).toContain('indisponible');
   });
+
+  it('dossier illisible : erreur et Recharger, Renvoyer et Abandonner restent utilisables, ni Récupérer ni PR', async () => {
+    api.validation.mockRejectedValue(new Error('lecture de la branche impossible'));
+    const fx = TestBed.createComponent(ValidationVue);
+    fx.componentRef.setInput('id', 'T-41');
+    fx.componentRef.setInput('fiche', fiche);
+    const el = fx.nativeElement as HTMLElement;
+    const attendre = async () => { await fx.whenStable(); await fx.whenStable(); };
+    const bouton = (t: string) => [...el.querySelectorAll('button')].find(b => b.textContent!.trim() === t) as HTMLButtonElement | undefined;
+    await attendre();
+    expect(el.textContent).toContain('lecture de la branche impossible');
+    expect(bouton('Recharger')).toBeDefined();
+    expect(bouton('Récupérer la branche')).toBeUndefined();
+    expect(bouton('Ouvrir une PR')).toBeUndefined();
+
+    bouton('Renvoyer avec commentaire')!.click(); await fx.whenStable();
+    const zone = el.querySelector('textarea')!;
+    zone.value = 'Le volume a disparu'; zone.dispatchEvent(new Event('input'));
+    await fx.whenStable();
+    bouton('Renvoyer')!.click();
+    await attendre();
+    expect(api.action).toHaveBeenCalledWith('T-41', 'renvoi', { commentaire: 'Le volume a disparu' });
+    expect(el.textContent).toContain("Tâche renvoyée à l'implémenteur.");
+
+    bouton('Abandonner')!.click(); await fx.whenStable();
+    [...el.querySelectorAll('.dialogue button')].find(b => b.textContent!.trim() === 'Abandonner')!.dispatchEvent(new Event('click'));
+    await attendre();
+    expect(api.action).toHaveBeenCalledWith('T-41', 'abandon', {});
+    expect(el.textContent).toContain('Tâche abandonnée.');
+  });
 });

@@ -50,6 +50,21 @@ describe('DiffVue', () => {
     expect(texte()).not.toContain('Caractères invisibles');
   });
 
+  it('fins de ligne CRLF : ni marqueur ni bandeau', async () => {
+    const { el, texte } = await ouvrir({ diff: DIFF.split('\n').map(l => `${l}\r`).join('\n'), fichiers: FICHIERS, tronque: false });
+    expect(texte()).not.toContain('Caractères invisibles');
+    expect(el.querySelector('pre')!.textContent).not.toContain('⟦U+000D⟧');
+    expect(ligne(el, '+neuf').className).toBe('ajout');
+  });
+
+  it('\\r au milieu d’une ligne ou en plus du CRLF : marqueur et bandeau', async () => {
+    for (const diff of ['+a\rb', '+a\r\r']) {
+      const { el, texte } = await ouvrir({ diff, fichiers: [], tronque: false });
+      expect(el.querySelector('pre')!.textContent).toContain('+a⟦U+000D⟧');
+      expect(texte()).toContain('Caractères invisibles ou de contrôle présents dans le diff');
+    }
+  });
+
   it('du HTML dans le diff reste du texte', async () => {
     const { el } = await ouvrir({ diff: '+<img src=x onerror=alert(1)>', fichiers: [{ fichier: '<img src=x>', ajouts: 1, suppressions: 0 }], tronque: false });
     expect(el.querySelector('img')).toBeNull();

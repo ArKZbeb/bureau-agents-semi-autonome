@@ -45,16 +45,21 @@ type Onglet = 'diff' | 'rapports' | 'avis' | 'journal';
             </ul>
           }
         }
+      } @else if (!erreurChargement()) { <p class="doux">Chargement…</p> }
+      <!-- Renvoyer et Abandonner n'ont pas besoin du dossier : ils restent offerts quand sa lecture échoue (Docker, volume, branche altérée). -->
+      @if (dossier() || erreurChargement()) {
         @if (message(); as m) { <p class="go">{{ m }}</p> }
         @if (erreur(); as e) { <p class="alerte">{{ e }}</p> }
         <div class="actions">
-          <button [disabled]="envoi() || !!raisonIntegrite()" (click)="recuperer()">Récupérer la branche</button>
-          <button class="principal" [disabled]="envoi() || !!raisonIntegrite()" (click)="ouvrirPr()">Ouvrir une PR</button>
+          @if (dossier()) {
+            <button [disabled]="envoi() || !!raisonIntegrite()" (click)="recuperer()">Récupérer la branche</button>
+            <button class="principal" [disabled]="envoi() || !!raisonIntegrite()" (click)="ouvrirPr()">Ouvrir une PR</button>
+          }
           <button [disabled]="envoi()" (click)="dialogue.set('renvoi')">Renvoyer avec commentaire</button>
           <button class="danger" [disabled]="envoi()" (click)="dialogue.set('abandon')">Abandonner</button>
-          <button [disabled]="envoi()" (click)="recharger()">Recharger</button>
+          @if (dossier()) { <button [disabled]="envoi()" (click)="recharger()">Recharger</button> }
         </div>
-      } @else if (!erreurChargement()) { <p class="doux">Chargement…</p> }
+      }
       @if (dialogue() === 'renvoi') {
         <div class="voile"><section class="dialogue">
           <h2>Renvoyer avec commentaire</h2>
