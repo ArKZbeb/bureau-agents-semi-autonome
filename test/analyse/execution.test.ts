@@ -33,6 +33,17 @@ type Options = {
   attente?: (cmd: string[]) => Promise<{ StatusCode: number }>;
   creation?: (cmd: string[]) => void;
   reseauLeve?: boolean;
+  /** Contenu rendu par les lectures jetables, par chemin lu ; les autres chemins sont introuvables. */
+  fichiers?: Record<string, string>;
+};
+
+/** Trame stdout du flux multiplexé de Docker. */
+const trame = (texte: string) => {
+  const contenu = Buffer.from(texte);
+  const entete = Buffer.alloc(8);
+  entete[0] = 1;
+  entete.writeUInt32BE(contenu.length, 4);
+  return Buffer.concat([entete, contenu]);
 };
 
 /** Docker minimal en mémoire : conteneurs d'analyse pilotés par le test, lectures jetables qui ne trouvent rien. */
@@ -58,6 +69,7 @@ function fauxDocker(o: Options = {}) {
       o.creation?.(cmd);
       etat.crees.push(opts);
       const lecture = cmd[0] === 'sh';
+      const lu = lecture ? o.fichiers?.[cmd[4]] : undefined;
       return {
         id,
         start: async () => { if (lecture) etat.lecturesMax = Math.max(etat.lecturesMax, ++etat.lecturesEnCours); },
@@ -65,9 +77,9 @@ function fauxDocker(o: Options = {}) {
           if (!lecture) return (o.attente ?? (async () => ({ StatusCode: 0 })))(cmd);
           await new Promise(r => setTimeout(r, 5));
           etat.lecturesEnCours--;
-          return { StatusCode: 3 };
+          return { StatusCode: lu === undefined ? 3 : 0 };
         },
-        logs: async () => Buffer.alloc(0),
+        logs: async () => (lu === undefined ? Buffer.alloc(0) : trame(lu)),
         remove: async () => { etat.supprimes.add(id); },
       };
     },
@@ -191,4 +203,16 @@ test('fichiers d’analyse relus avec le plafond d’analyse (64 Mo), jamais tro
   const lectures = etat.crees.filter(c => (c.Cmd as string[])[0] === 'sh');
   assert.ok(lectures.length > 0);
   for (const c of lectures) assert.equal((c.Cmd as string[]).at(-1), String(PLAFOND_ANALYSE + 1), JSON.stringify(c.Cmd));
+});
+
+test('journal des outils : « Erreur » pour un outil absent, « Autorisé » pour une mesure ou une non-applicabilité', async () => {
+  const fichiers = { '/workspace/stack_angular.na': '', '/workspace/analyse/tests_angular.na': '' };
+  const { docker } = fauxDocker({ fichiers });
+  const d = deps(docker);
+  const a = await executerAnalyse(d, T, 'copie', BASE);
+  assert.equal(a.outils.tests_angular, 'non_applicable');
+  const outils = lireJournal(d.db, T).filter(e => e.raison.startsWith('analyse de review : '));
+  assert.equal(outils.length, 7);
+  for (const e of outils) assert.equal(e.decision, e.raison.endsWith(': absent') ? 'Erreur' : 'Autorisé', `${e.commande} ${e.raison}`);
+  assert.deepEqual(outils.filter(e => e.decision === 'Autorisé').map(e => e.commande), ['ng test']);
 });

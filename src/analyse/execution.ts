@@ -111,7 +111,7 @@ export async function executerAnalyse(deps: DepsExecution, tacheId: string, volu
   const analyse = assemblerAnalyse(base, fichiers);
   for (const o of [...OUTILS, 'couverture'] as const)
     ajouterAuJournal(deps.db, deps.cle, {
-      tacheId, type: 'evenement', commande: LIBELLES_OUTILS[o], couche: '—', decision: 'Autorisé', decideur: 'Orchestrateur',
+      tacheId, type: 'evenement', commande: LIBELLES_OUTILS[o], couche: '—', decision: analyse.outils[o] === 'absent' ? 'Erreur' : 'Autorisé', decideur: 'Orchestrateur',
       raison: `analyse de review : ${analyse.outils[o]}`,
     });
   return analyse;
