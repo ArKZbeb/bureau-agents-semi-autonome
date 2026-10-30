@@ -44,7 +44,16 @@ function tacheEnValidation(db: Base, tacheId: string): Tache {
 export async function dossierValidation(deps: DepsValidation, tacheId: string): Promise<DossierValidation> {
   const { db, cle } = deps;
   const t = tacheEnValidation(db, tacheId);
-  const { sha } = lireAnalyse(db, cle, tacheId);
+  const anomalie = (raison: string) => ajouterAuJournal(db, cle, {
+    tacheId, type: 'evenement', commande: 'contrôle de la branche avant validation', couche: '—', decision: 'Refusé', decideur: 'Contrôleur d’intégrité', raison: raison.slice(0, 200),
+  });
+  let sha: string;
+  try {
+    sha = lireAnalyse(db, cle, tacheId).sha;
+  } catch (e) {
+    if (e instanceof AnomalieIntegrite) anomalie(e.message);
+    throw e;
+  }
   if (!t.commitBase) throw new Error('commit de base inconnu : lecture de la branche impossible');
   const lecture = await deps.lire(nomRessource(tacheId), t.commitBase, sha);
   if (!lecture) throw new Error('lecture de la branche impossible');
@@ -53,15 +62,14 @@ export async function dossierValidation(deps: DepsValidation, tacheId: string): 
   if (lecture.pointe !== sha) {
     const raison = `la branche a changé depuis l’analyse (pointe ${lecture.pointe.slice(0, 7)} au lieu de ${sha.slice(0, 7)})`;
     integrite = { verifiee: false, raison };
-    ajouterAuJournal(db, cle, {
-      tacheId, type: 'evenement', commande: 'contrôle de la branche avant validation', couche: '—', decision: 'Refusé', decideur: 'Contrôleur d’intégrité', raison,
-    });
+    anomalie(raison);
   } else {
     try {
       verifierArtefactsTache(db, cle, tacheId);
     } catch (e) {
       if (!(e instanceof AnomalieIntegrite)) throw e;
       integrite = { verifiee: false, raison: e.message };
+      anomalie(e.message);
     }
   }
 

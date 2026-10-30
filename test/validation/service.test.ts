@@ -114,6 +114,22 @@ test('dossier : artefact altéré en base -> non vérifiée avec le message de l
   const dossier = await dossierValidation(deps(db).d, 'T-43');
   assert.equal(dossier.integrite.verifiee, false);
   assert.match((dossier.integrite as { raison: string }).raison, /spec de T-43 modifié après validation/);
+  const e = lireJournal(db, 'T-43').at(-1)!;
+  assert.deepEqual([e.decision, e.decideur, e.commande], ['Refusé', 'Contrôleur d’intégrité', 'contrôle de la branche avant validation']);
+  assert.match(e.raison, /spec de T-43 modifié après validation/);
+  verifierJournal(db, cle);
+});
+
+test('dossier : analyse altérée -> erreur, rien lu, journal « Refusé »', async () => {
+  const db = tache();
+  db.prepare(`UPDATE artefacts SET contenu = '{"sha":"${AUTRE}","base":"${B}","outils":{}}' WHERE tache_id = 'T-43' AND type = 'analyse'`).run();
+  const { d, appels } = deps(db);
+  await assert.rejects(dossierValidation(d, 'T-43'), /analyse de T-43 modifié après validation/);
+  assert.deepEqual(appels.lire, []);
+  const e = lireJournal(db, 'T-43').at(-1)!;
+  assert.deepEqual([e.decision, e.decideur, e.commande], ['Refusé', 'Contrôleur d’intégrité', 'contrôle de la branche avant validation']);
+  assert.match(e.raison, /analyse de T-43 modifié après validation/);
+  verifierJournal(db, cle);
 });
 
 test('récupération : bundle importé dans task/43, tâche terminée, volumes supprimés, journal « Autorisé »', async () => {
