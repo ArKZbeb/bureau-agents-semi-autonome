@@ -1,5 +1,6 @@
 import { Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { ApiService } from '../api';
+import { ConfirmationAbandon } from './confirmation-abandon';
 import { commandeVisible } from '../commande-visible';
 import { heure } from '../libelles';
 import type { DossierValidation, EntreeJournal, FicheTache } from '../modeles';
@@ -10,7 +11,7 @@ type Onglet = 'diff' | 'rapports' | 'avis' | 'journal';
 
 @Component({
   selector: 'app-validation',
-  imports: [DiffVue, RapportVue],
+  imports: [DiffVue, RapportVue, ConfirmationAbandon],
   template: `
     <div class="bloc">
       @if (erreurChargement(); as e) { <p class="alerte">{{ e }} <button (click)="recharger()">Recharger</button></p> }
@@ -65,14 +66,7 @@ type Onglet = 'diff' | 'rapports' | 'avis' | 'journal';
         </section></div>
       }
       @if (dialogue() === 'abandon') {
-        <div class="voile"><section class="dialogue">
-          <h2>Abandonner {{ fiche().tache.id }} ?</h2>
-          <p>Abandonner {{ fiche().tache.id }} ? La branche n'est pas récupérée et l'espace de la tâche est supprimé.</p>
-          <footer>
-            <button (click)="dialogue.set(null)">Annuler</button>
-            <button class="danger" [disabled]="envoi()" (click)="abandonner()">Abandonner</button>
-          </footer>
-        </section></div>
+        <app-confirmation-abandon [id]="fiche().tache.id" [occupe]="envoi()" (annuler)="dialogue.set(null)" (confirmer)="abandonner()" />
       }
     </div>`,
   styles: `

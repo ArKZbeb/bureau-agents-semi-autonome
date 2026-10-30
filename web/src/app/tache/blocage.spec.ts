@@ -49,6 +49,15 @@ describe('BlocageVue', () => {
     expect(api.historique).toHaveBeenCalledTimes(1);
   });
 
+  it('une fiche relue (même id, nouvel objet) ne relit pas l’historique', async () => {
+    const { fx, attendre } = await ouvrir();
+    fx.componentRef.setInput('tache', { ...tache, depenseUsd: 5 });
+    await attendre();
+    fx.componentRef.setInput('tache', { ...tache, depenseUsd: 5.5 });
+    await attendre();
+    expect(api.historique).toHaveBeenCalledTimes(1);
+  });
+
   it('historique dans l’ordre reçu', async () => {
     const { texte } = await ouvrir();
     expect(texte()).toContain('Historique des 3 essais');
@@ -66,6 +75,14 @@ describe('BlocageVue', () => {
     expect(api.action).toHaveBeenLastCalledWith('T-41', 'relance', { vers: 'cadrage' });
     expect(faits.length).toBe(2);
     expect(api.historique).toHaveBeenCalledTimes(3);
+  });
+
+  it('exactement une relecture après une action réussie, même si le parent met la fiche à jour', async () => {
+    const { fx, bouton, attendre } = await ouvrir();
+    bouton('Relancer').click(); await attendre();
+    fx.componentRef.setInput('tache', { ...tache, depenseUsd: 5 });
+    await attendre();
+    expect(api.historique).toHaveBeenCalledTimes(2);
   });
 
   it('relance avec commentaire : « Relancer » du dialogue désactivé si vide', async () => {

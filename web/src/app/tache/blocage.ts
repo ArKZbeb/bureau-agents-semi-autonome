@@ -1,11 +1,13 @@
 import { Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { ApiService } from '../api';
+import { ConfirmationAbandon } from './confirmation-abandon';
 import { commandeVisible } from '../commande-visible';
 import { budget, heure } from '../libelles';
 import type { EntreeHistorique, NomAction, Tache } from '../modeles';
 
 @Component({
   selector: 'app-blocage',
+  imports: [ConfirmationAbandon],
   template: `
     <div class="bloc">
       <h2>Mon bureau · Tâche bloquée</h2>
@@ -46,14 +48,7 @@ import type { EntreeHistorique, NomAction, Tache } from '../modeles';
         </section></div>
       }
       @if (dialogue() === 'abandon') {
-        <div class="voile"><section class="dialogue">
-          <h2>Abandonner {{ tache().id }} ?</h2>
-          <p>Abandonner {{ tache().id }} ? La branche n'est pas récupérée et l'espace de la tâche est supprimé.</p>
-          <footer>
-            <button (click)="dialogue.set(null)">Annuler</button>
-            <button class="danger" [disabled]="envoi()" (click)="abandonner()">Abandonner</button>
-          </footer>
-        </section></div>
+        <app-confirmation-abandon [id]="tache().id" [occupe]="envoi()" (annuler)="dialogue.set(null)" (confirmer)="abandonner()" />
       }
     </div>`,
   styles: `
@@ -78,12 +73,14 @@ export class BlocageVue {
   protected readonly budget = budget;
   protected readonly heure = heure;
   protected readonly derniere = computed(() => this.historique()[0] ?? null);
+  /** Identifiant dédoublonné : la fiche est relue toutes les 3 s et fournit un nouvel objet, pas un nouvel id. */
+  private readonly id = computed(() => this.tache().id);
   private chargement = 0;
 
   constructor() {
     // Une lecture par tâche affichée ; pas d'interrogation périodique.
     effect(() => {
-      const id = this.tache().id;
+      const id = this.id();
       untracked(() => void this.charger(id));
     });
   }

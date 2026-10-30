@@ -1,5 +1,6 @@
 import { Component, inject, input, output, signal } from '@angular/core';
 import { ApiService } from '../api';
+import { ConfirmationAbandon } from './confirmation-abandon';
 import { commandeVisible } from '../commande-visible';
 import { LIBELLE_ETAPE } from '../libelles';
 import type { NomAction, Tache } from '../modeles';
@@ -8,6 +9,7 @@ const PREFIXE = /^integrite : /;
 
 @Component({
   selector: 'app-alerte',
+  imports: [ConfirmationAbandon],
   template: `
     <div class="bloc">
       <h2>Poste de sécurité · Alerte d'intégrité</h2>
@@ -23,14 +25,7 @@ const PREFIXE = /^integrite : /;
       </div>
       <p class="doux">Quelle que soit ta décision, elle est consignée dans le journal des commandes.</p>
       @if (dialogue()) {
-        <div class="voile"><section class="dialogue">
-          <h2>Abandonner {{ tache().id }} ?</h2>
-          <p>Abandonner {{ tache().id }} ? La branche n'est pas récupérée et l'espace de la tâche est supprimé.</p>
-          <footer>
-            <button (click)="dialogue.set(false)">Annuler</button>
-            <button class="danger" [disabled]="envoi()" (click)="agir('abandon', {}, 'Tâche abandonnée.')">Abandonner</button>
-          </footer>
-        </section></div>
+        <app-confirmation-abandon [id]="tache().id" [occupe]="envoi()" (annuler)="dialogue.set(false)" (confirmer)="agir('abandon', {}, 'Tâche abandonnée.')" />
       }
     </div>`,
   styles: `
