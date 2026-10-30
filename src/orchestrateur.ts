@@ -34,6 +34,7 @@ import { relayerApi } from './reseau/proxy-api.ts';
 import { creerServeurConteneurs } from './reseau/serveur-conteneurs.ts';
 import { creerServeurUi } from './reseau/serveur-ui.ts';
 import { appliquer, creerTache, definirCommitBase, listerTaches, lireTache, reprendreApresRedemarrage, type NouvelleTache, type Tache } from './taches/depot.ts';
+import { detecterProjet, lireProjet, listerProjets, relierProjet } from './taches/projets.ts';
 import { listerEchanges, lireProposition } from './taches/echanges.ts';
 
 export type OptionsOrchestrateur = {
@@ -170,6 +171,19 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
     taches: () => listerTaches(db),
     journal: id => lireJournal(db, id ?? undefined),
     escalades: () => db.prepare(`SELECT id, tache_id AS tacheId, outil, entree, raison, cree_le AS creeLe FROM escalades WHERE statut = 'en_attente' ORDER BY id`).all(),
+    integriteJournal: () => {
+      const entrees = (db.prepare('SELECT COUNT(*) AS n FROM journal').get() as { n: number }).n;
+      try {
+        verifierJournal(db, cle);
+        return { intacte: true, entrees };
+      } catch (e) {
+        return { intacte: false, entrees, erreur: (e as Error).message };
+      }
+    },
+    etat: () => ({ ordonnanceur: ordonnanceur.estSuspendu() ? 'suspendu' : 'actif' }),
+    projets: () => listerProjets(db, config.seuilCouvertureLignes),
+    detecterProjet: chemin => detecterProjet(chemin),
+    relierProjet: p => relierProjet(db, p),
     deciderEscalade: decision,
     arretGlobal,
     repriseGlobale,
@@ -177,7 +191,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
       if (!db.prepare('SELECT 1 FROM taches WHERE id = ?').get(id)) return null;
       const t = lireTache(db, id);
       try {
-        const documents = Object.fromEntries((['demande', 'spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict'] as const)
+        const documents = Object.fromEntries((['demande', 'spec', 'criteres', 'plan', 'avis_patron', 'resume', 'rapport', 'avis_patron_code', 'verdict', 'analyse'] as const)
           .map(type => [type, lireArtefact(db, cle, id, type)?.contenu ?? null]));
         return { tache: t, documents, proposition: lireProposition(db, id), echanges: listerEchanges(db, id) };
       } catch (e) {
@@ -188,7 +202,11 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
         return { tache: lireTache(db, id), anomalie: e.message };
       }
     },
-    creerTache: t => creerTacheAvecDemande(t),
+    creerTache: ({ projet, titre, demande }) => {
+      const p = lireProjet(db, projet, config.seuilCouvertureLignes);
+      if (!p) throw new Error(`projet non relié : ${projet}`);
+      return creerTacheAvecDemande({ projet: p.nom, titre, demande, cheminProjet: p.chemin, budgetUsd: p.budgetUsd });
+    },
     action: (id, nom, c) => {
       if (nom === 'reponse') return repondreCadreur(db, cle, id, String(c.texte ?? ''));
       if (nom === 'validation-cadrage') return validerCadrage(db, cle, id);

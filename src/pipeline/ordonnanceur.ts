@@ -94,6 +94,7 @@ export function creerOrdonnanceur(deps: DepsPipeline, o: OptionsOrdonnanceur, av
     enVol: () => [...enVol.keys()],
     suspendre: () => { suspendu = true; },
     reactiver: () => { suspendu = false; },
+    estSuspendu: () => suspendu,
     demarrer: () => { minuteur ??= setInterval(() => void tour().catch(journaliserErreurTour), o.intervalleMs); },
     arreter: async () => { clearInterval(minuteur); minuteur = undefined; await Promise.all(enVol.values()); },
   };

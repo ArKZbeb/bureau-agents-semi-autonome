@@ -7,13 +7,18 @@ import { lireCorps, repondreJson } from './http.ts';
 export type RoutesUi = {
   taches: () => unknown;
   journal: (tacheId: string | null) => unknown;
+  integriteJournal: () => unknown;
   escalades: () => unknown;
   deciderEscalade: (id: number, decision: 'approuver' | 'refuser', commentaire: string) => unknown;
   arretGlobal: () => Promise<unknown>;
   /** Réactive l'ordonnanceur suspendu par l'arrêt global ; les tâches restent en pause. */
   repriseGlobale: () => unknown;
+  etat: () => unknown;
+  projets: () => unknown;
+  detecterProjet: (chemin: string) => unknown;
+  relierProjet: (p: { nom: string; chemin: string; budgetUsd: number; couvertureLignes: number }) => unknown;
   tache: (id: string) => unknown;
-  creerTache: (t: { projet: string; titre: string; cheminProjet: string; budgetUsd: number; demande: string }) => Promise<unknown>;
+  creerTache: (t: { projet: string; titre: string; demande: string }) => Promise<unknown>;
   action: (id: string, nom: NomAction, corps: Record<string, unknown>) => unknown;
 };
 
@@ -28,6 +33,15 @@ async function lireObjet(req: http.IncomingMessage): Promise<Record<string, unkn
     return null;
   }
 }
+
+async function conflit(res: http.ServerResponse, fn: () => unknown): Promise<void> {
+  try {
+    repondreJson(res, 200, await fn());
+  } catch (e) {
+    repondreJson(res, 409, { erreur: (e as Error).message });
+  }
+}
+const texte = (v: unknown) => typeof v === 'string' && v.trim() !== '';
 
 const egal = (a: string, b: string) => timingSafeEqual(Buffer.from(sha256(a), 'hex'), Buffer.from(sha256(b), 'hex'));
 
@@ -50,6 +64,24 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
 
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   if (req.method === 'GET' && url.pathname === '/api/taches') return repondreJson(res, 200, routes.taches());
+  if (req.method === 'GET' && url.pathname === '/api/journal/integrite') return repondreJson(res, 200, routes.integriteJournal());
+  if (req.method === 'GET' && url.pathname === '/api/etat') return repondreJson(res, 200, routes.etat());
+  if (req.method === 'GET' && url.pathname === '/api/projets') return repondreJson(res, 200, routes.projets());
+  if (req.method === 'POST' && url.pathname === '/api/projets/detection') {
+    const c = await lireObjet(req);
+    if (!c || typeof c.chemin !== 'string' || !path.isAbsolute(c.chemin)) return repondreJson(res, 400, { erreur: 'attendu : chemin absolu' });
+    const chemin = c.chemin;
+    return conflit(res, () => routes.detecterProjet(chemin));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/projets') {
+    const c = await lireObjet(req);
+    const ok = c && texte(c.nom) && typeof c.chemin === 'string' && path.isAbsolute(c.chemin)
+      && typeof c.budgetUsd === 'number' && Number.isFinite(c.budgetUsd) && c.budgetUsd > 0
+      && Number.isInteger(c.couvertureLignes) && (c.couvertureLignes as number) >= 0 && (c.couvertureLignes as number) <= 100;
+    if (!c || !ok) return repondreJson(res, 400, { erreur: 'attendu : nom, chemin absolu, budgetUsd > 0, couvertureLignes entier de 0 à 100' });
+    const { nom, chemin, budgetUsd, couvertureLignes } = c as Parameters<RoutesUi['relierProjet']>[0];
+    return conflit(res, () => routes.relierProjet({ nom, chemin, budgetUsd, couvertureLignes }));
+  }
   if (req.method === 'GET' && url.pathname === '/api/journal') return repondreJson(res, 200, routes.journal(url.searchParams.get('tache')));
   if (req.method === 'GET' && url.pathname === '/api/escalades') return repondreJson(res, 200, routes.escalades());
   const escalade = /^\/api\/escalades\/(\d+)$/.exec(url.pathname);
@@ -62,12 +94,10 @@ async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessag
   }
   if (req.method === 'POST' && url.pathname === '/api/taches') {
     const c = await lireObjet(req);
-    const ok = c && ['projet', 'titre', 'cheminProjet', 'demande'].every(k => typeof c[k] === 'string' && (c[k] as string).trim() !== '')
-      && typeof c.budgetUsd === 'number' && Number.isFinite(c.budgetUsd) && c.budgetUsd > 0 && path.isAbsolute(c.cheminProjet as string);
-    if (!c || !ok) return repondreJson(res, 400, { erreur: 'attendu : projet, titre, demande, cheminProjet absolu, budgetUsd > 0' });
-    // Objet explicite : l'identifiant est toujours attribué par l'orchestrateur, jamais par le corps.
-    const { projet, titre, cheminProjet, budgetUsd, demande } = c as Parameters<RoutesUi['creerTache']>[0];
-    return repondreJson(res, 200, await routes.creerTache({ projet, titre, cheminProjet, budgetUsd, demande }));
+    if (!c || !['projet', 'titre', 'demande'].every(k => texte(c[k]))) return repondreJson(res, 400, { erreur: 'attendu : projet, titre, demande' });
+    // Objet explicite : chemin, budget et identifiant viennent de l'orchestrateur, jamais du corps.
+    const { projet, titre, demande } = c as Parameters<RoutesUi['creerTache']>[0];
+    return conflit(res, () => routes.creerTache({ projet, titre, demande }));
   }
   const fiche = /^\/api\/taches\/(T-\d+)$/.exec(url.pathname);
   if (req.method === 'GET' && fiche) {

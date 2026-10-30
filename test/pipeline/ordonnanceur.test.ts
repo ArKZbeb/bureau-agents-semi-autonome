@@ -228,3 +228,14 @@ test('erreur dans le gestionnaire d’échec d’une étape : aucune promesse re
     process.off('unhandledRejection', surRejet);
   }
 });
+
+test('estSuspendu suit suspendre et reactiver', async () => {
+  const b = banc(1);
+  const o = creerOrdonnanceur(b.deps, { simultanees: 1, intervalleMs: 10, delaisErreurApiMs: [1000] }, async (_d, id) => lireTache(b.db, id));
+  assert.equal(o.estSuspendu(), false);
+  o.suspendre();
+  assert.equal(o.estSuspendu(), true);
+  o.reactiver();
+  assert.equal(o.estSuspendu(), false);
+  await o.arreter();
+});
