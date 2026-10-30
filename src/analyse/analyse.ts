@@ -32,23 +32,21 @@ const RAPPORTS: Partial<Record<NomOutil, [string, (t: string) => Constat[] | nul
   semgrep: ['semgrep.json', lireSemgrep], gitleaks: ['gitleaks.json', lireGitleaks],
 };
 
+const aTourne = (s: StatutOutil) => s === 'ok' || s === 'echec';
+
 export function assemblerAnalyse(base: string, fichiers: Record<string, string | null>): Analyse {
   const lu = (nom: string) => fichiers[nom] ?? null;
-  const constats: Constat[] = [];
   const statut = (o: NomOutil): StatutOutil => {
     if (lu(`${o}.na`) !== null) return 'non_applicable';
     const code = lu(`${o}.code`);
     if (code === null || !/^\s*\d+\s*$/.test(code)) return 'absent';
-    const rapport = RAPPORTS[o];
     if (Number(code) === MESURE_IMPOSSIBLE) return 'absent';
+    const rapport = RAPPORTS[o];
     if (rapport) {
       // Pour ces outils, un code non nul est une erreur de l'outil, pas un constat.
       if (Number(code) !== 0) return 'absent';
       const texte = lu(rapport[0]);
-      const c = texte === null ? null : rapport[1](texte);
-      if (c === null) return 'absent';
-      constats.push(...c);
-      return 'ok';
+      return texte !== null && rapport[1](texte) !== null ? 'ok' : 'absent';
     }
     if (Number(code) !== 0) return 'echec';
     // Tests .NET « réussis » sans TRX lisible : la mesure manque.
@@ -57,23 +55,33 @@ export function assemblerAnalyse(base: string, fichiers: Record<string, string |
   };
   const outils = Object.fromEntries(OUTILS.map(o => [o, statut(o)])) as Record<NomOutil, StatutOutil>;
 
+  // Mesures de mesurer.sh interrompu (sha incomplet) : les mesures statiques ne sont pas fiables.
+  const shaValide = /^[0-9a-f]{40}$/.test((lu('sha') ?? '').trim());
+  if (!shaValide) for (const o of ['semgrep', 'gitleaks', 'audit_npm'] as const) outils[o] = 'absent';
+
   const trx = lireTrx(lu('dotnet.trx') ?? '');
-  const stacksTestees = (['tests_dotnet', 'tests_angular'] as const).filter(o => outils[o] === 'ok' || outils[o] === 'echec');
-  const couvertures = [
-    outils.tests_dotnet === 'ok' || outils.tests_dotnet === 'echec' ? lu('dotnet.cobertura.xml') : null,
-    outils.tests_angular === 'ok' || outils.tests_angular === 'echec' ? lu('angular.cobertura.xml') : null,
-  ].filter((x): x is string => x !== null).map(lireCobertura).filter(c => c.size > 0); // rapport illisible = aucune classe
+  const patch = lu('diff.patch');
+  const stacks: [NomOutil, string][] = [['tests_dotnet', 'dotnet.cobertura.xml'], ['tests_angular', 'angular.cobertura.xml']];
+  const testees = stacks.filter(([o]) => aTourne(outils[o]));
+  // Chaque stack testée doit avoir un Cobertura lisible (au moins une classe) : sinon une stack entière n'est pas mesurée.
+  const couvertures = testees.map(([, f]) => lireCobertura(lu(f) ?? '')).filter(c => c.size > 0);
   const toutesNonApplicables = outils.tests_dotnet === 'non_applicable' && outils.tests_angular === 'non_applicable';
-  const statutCouverture: StatutOutil = toutesNonApplicables ? 'non_applicable' : stacksTestees.length && couvertures.length ? 'ok' : 'absent';
-  const patch = lu('diff.patch') ?? '';
+  const couvertureMesurable = shaValide && patch !== null && testees.length > 0 && couvertures.length === testees.length;
+  const statutCouverture: StatutOutil = toutesNonApplicables && shaValide ? 'non_applicable' : couvertureMesurable ? 'ok' : 'absent';
+
+  const constats: Constat[] = [];
+  for (const o of OUTILS) {
+    const rapport = RAPPORTS[o];
+    if (rapport && outils[o] === 'ok') constats.push(...(rapport[1](lu(rapport[0]) ?? '') ?? []));
+  }
 
   return {
     sha: (lu('sha') ?? '').trim(),
     base,
     outils: { ...outils, couverture: statutCouverture },
     tests: trx,
-    couverture: statutCouverture === 'ok' ? couvertureLignesModifiees(lignesModifiees(patch), couvertures) : null,
+    couverture: statutCouverture === 'ok' ? couvertureLignesModifiees(lignesModifiees(patch ?? ''), couvertures) : null,
     constats,
-    signalements: signesDeTriche(patch),
+    signalements: signesDeTriche(patch ?? ''),
   };
 }

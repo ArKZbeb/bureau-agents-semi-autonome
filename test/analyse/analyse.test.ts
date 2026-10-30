@@ -96,3 +96,38 @@ test('Angular seul : tests ok et couverture lue dans angular.cobertura.xml', () 
   assert.equal(a.outils.couverture, 'ok');
   assert.equal(a.tests, null);
 });
+
+test('deux stacks testées dont une sans Cobertura lisible : couverture absente', () => {
+  const f = dotnetSeul();
+  delete f['tests_angular.na'];
+  f['tests_angular.code'] = '0';
+  f['angular.cobertura.xml'] = null;
+  f['dotnet.trx'] = '<Counters total="5" failed="0" />';
+  f['tests_dotnet.code'] = '0';
+  const a = assemblerAnalyse(BASE, f);
+  assert.equal(a.outils.tests_angular, 'ok');
+  assert.equal(a.outils.couverture, 'absent');
+  assert.equal(a.couverture, null);
+});
+
+test('diff.patch absent : couverture absente', () => {
+  const f = dotnetSeul();
+  delete f['diff.patch'];
+  const a = assemblerAnalyse(BASE, f);
+  assert.equal(a.outils.couverture, 'absent');
+  assert.equal(a.couverture, null);
+});
+
+test('sha invalide ou absent : mesures statiques et couverture forcées à absent, sans constats', () => {
+  for (const sha of [null, 'abc', `${SHA}\nautre`, 'g'.repeat(40)]) {
+    const f = dotnetSeul();
+    f.sha = sha;
+    f['gitleaks.json'] = JSON.stringify([{ RuleID: 'generic-api-key', File: 'src/a.cs', StartLine: 1, Secret: 'x' }]);
+    const a = assemblerAnalyse(BASE, f);
+    for (const o of ['semgrep', 'gitleaks', 'audit_npm', 'couverture'] as const) {
+      assert.equal(a.outils[o], 'absent', `${String(sha)} ${o}`);
+    }
+    assert.deepEqual(a.constats, []);
+    assert.equal(a.outils.tests_dotnet, 'echec');
+  }
+});
