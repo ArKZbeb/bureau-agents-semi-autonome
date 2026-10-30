@@ -1,21 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ouvrirBase } from '../../src/db.ts';
-import { creerTache, appliquer, lireTache } from '../../src/taches/depot.ts';
+import { creerTache, appliquer, definirAgent, lireTache } from '../../src/taches/depot.ts';
 import { enregistrerArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal, verifierJournal } from '../../src/integrite/journal.ts';
-import { decider, deciderEscalade, type DepsGardien, type EntreeHook } from '../../src/gardien/service.ts';
+import { decider, deciderEscalade, OUTIL_SORTIE, type DepsGardien, type EntreeHook } from '../../src/gardien/service.ts';
 import type { Avis, DemandeAvis } from '../../src/gardien/avis.ts';
 import type { Fiche } from '../../src/gardien/dependances.ts';
+import { TROP_GROS, type LectureControlee } from '../../src/conteneurs/docker.ts';
 
 const cle = Buffer.alloc(32, 4);
 const PLAN = '# Plan T-45\n\n## Zones touchées\n\n- `src/**`\n';
 
-function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, string>; fiche?: Partial<Fiche>; liens?: Record<string, string | null> } = {}) {
+function monter(o: { avis?: Avis['decision']; fichiers?: Record<string, LectureControlee>; fiche?: Partial<Fiche>; liens?: Record<string, string | null> } = {}) {
   const db = ouvrirBase(':memory:');
   creerTache(db, { id: 'T-45', projet: 'Conducteur', titre: 'Import CSV des conducteurs', cheminProjet: '/p', budgetUsd: 6 });
   enregistrerArtefact(db, cle, 'T-45', 'plan', PLAN);
   appliquer(db, 'T-45', { type: 'demarrage' });
+  // Comme le pipeline : un agent est déclaré pendant l'étape (sans agent, Write et Edit sont refusés).
+  definirAgent(db, 'T-45', 'implementeur');
   const demandes: DemandeAvis[] = [];
   const escalades: string[] = [];
   const deps: DepsGardien = {
@@ -269,4 +272,191 @@ test('pause d’intégrité levée par le gardien : l’arrêt du conteneur est 
   db.prepare("UPDATE artefacts SET contenu = contenu || '\n- `**`'").run();
   assert.equal(decision(await decider(deps, 'T-45', bash('git status'))), 'deny');
   assert.deepEqual(escalades, ['T-45']);
+});
+
+test('outil de sortie structurée autorisé comme outil interne', async () => {
+  const { deps } = monter();
+  const s = await decider(deps, 'T-45', { tool_name: OUTIL_SORTIE, tool_input: { resume: 'fait' }, tool_use_id: 'toolu_so' });
+  assert.equal(decision(s), 'allow');
+});
+
+test('agent en lecture seule : écriture refusée, lecture et Bash inchangés', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'reviewer');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  const [refus] = lireJournal(db, 'T-45');
+  assert.deepEqual([refus.decideur, refus.raison], ['Liste noire', 'agent en lecture seule : Write et Edit retirés']);
+  assert.equal(decision(await decider(deps, 'T-45', bash('dotnet test'))), 'allow');
+});
+
+test('cadreur : seulement spec.md et plan.md du dossier de cadrage', async () => {
+  const { db, deps } = monter({ liens: { '/workspace/cadrage/plan.md': '/workspace/projet/.git/hooks/pre-commit' } });
+  definirAgent(db, 'T-45', 'cadreur');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/spec.md', '# Spec'))), 'allow');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/plan.md', '# Plan'))), 'deny', 'lien symbolique refusé');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'le cadreur n’écrit que spec.md et plan.md');
+});
+
+test('implémenteur : écriture dans les zones du plan toujours possible', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'implementeur');
+  assert.notEqual(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'deny');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'allow');
+});
+
+test('plan altéré : écriture du cadreur refusée et tâche en pause', async () => {
+  const { db, deps, escalades } = monter();
+  definirAgent(db, 'T-45', 'cadreur');
+  db.prepare("UPDATE artefacts SET contenu = contenu || '\n- `**`' WHERE type = 'plan'").run();
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/cadrage/spec.md', '# Spec'))), 'deny');
+  assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
+  assert.match(lireTache(db, 'T-45').raison ?? '', /^integrite/);
+  assert.deepEqual(escalades, ['T-45']);
+});
+
+test('cadreur : Edit hors des deux fichiers refusé', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'cadreur');
+  const edit = { tool_name: 'Edit', tool_input: { file_path: '/workspace/cadrage/spec.md.bak', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_bak' };
+  assert.equal(decision(await decider(deps, 'T-45', edit)), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'le cadreur n’écrit que spec.md et plan.md');
+});
+
+test('agent inconnu : écriture refusée', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', 'inconnu');
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'x'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+});
+
+test('aucun agent déclaré : Write et Edit refusés (lecture seule par défaut, fail-closed)', async () => {
+  const { db, deps } = monter();
+  definirAgent(db, 'T-45', null);
+  assert.equal(decision(await decider(deps, 'T-45', ecrire('/workspace/projet/src/a.ts', 'export const a = 1;\n'))), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+  const edit = { tool_name: 'Edit', tool_input: { file_path: '/workspace/projet/src/a.ts', old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_sans_agent' };
+  assert.equal(decision(await decider(deps, 'T-45', edit)), 'deny');
+  assert.equal(lireJournal(db, 'T-45').at(-1)?.raison, 'agent en lecture seule : Write et Edit retirés');
+  assert.equal(decision(await decider(deps, 'T-45', bash('dotnet test'))), 'allow', 'lecture et Bash inchangés');
+});
+
+const TROP_VOLUMINEUX = 'fichier trop volumineux pour être contrôlé (> 5 Mo)';
+
+test('fichier trop gros pour être contrôlé : Edit et Bash qui l’exécute refusés, sans avis', async () => {
+  const gros = '/workspace/projet/src/gros.ts';
+  const script = '/workspace/projet/outils/gros.sh';
+  const { deps, demandes } = monter({ avis: 'autoriser', fichiers: { [gros]: TROP_GROS, [script]: TROP_GROS, '/workspace/projet/package.json': TROP_GROS } });
+  const raison = async (e: EntreeHook) => {
+    const s = await decider(deps, 'T-45', e);
+    assert.equal(decision(s), 'deny', JSON.stringify(e.tool_input));
+    return s.hookSpecificOutput.permissionDecisionReason;
+  };
+  assert.equal(await raison({ tool_name: 'Edit', tool_input: { file_path: gros, old_string: 'a', new_string: 'b' }, tool_use_id: 'toolu_gros_edit' }), TROP_VOLUMINEUX);
+  assert.equal(await raison(bash('bash outils/gros.sh')), TROP_VOLUMINEUX);
+  assert.equal(await raison(bash('npm test')), TROP_VOLUMINEUX, 'package.json des scripts npm');
+  assert.equal(demandes.length, 0);
+});
+
+test('fichier trop gros remplacé par Write : contrôlé sur le nouveau contenu (rien d’autre n’est jugé)', async () => {
+  const gros = '/workspace/projet/src/gros.ts';
+  const { deps } = monter({ fichiers: { [gros]: TROP_GROS } });
+  assert.equal(decision(await decider(deps, 'T-45', ecrire(gros, 'export const x = 1;'))), 'allow');
+});
+
+test('fichier devenu trop gros : l’autorisation à usage unique n’est ni appliquée ni consommée', async () => {
+  const fichiers: Record<string, LectureControlee> = { '/workspace/projet/outils/prepa.sh': 'echo ok' };
+  const { db, deps } = monter({ avis: 'demander', fichiers });
+  const e = bash('bash outils/prepa.sh');
+  assert.equal(decision(await decider(deps, 'T-45', e)), 'defer');
+  const { id } = db.prepare('SELECT id FROM escalades').get() as { id: number };
+  deciderEscalade(db, cle, id, 'approuver', 'ok');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  fichiers['/workspace/projet/outils/prepa.sh'] = TROP_GROS;
+  const s = await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_gros' });
+  assert.equal(decision(s), 'deny');
+  assert.equal(s.hookSpecificOutput.permissionDecisionReason, TROP_VOLUMINEUX);
+  assert.equal((db.prepare('SELECT utilisee FROM autorisations').get() as { utilisee: number }).utilisee, 0);
+  const [entree] = lireJournal(db, 'T-45').filter(x => x.toolUseId === 'toolu_gros');
+  assert.deepEqual([entree.decision, entree.decideur], ['Refusé', 'Liste noire']);
+});
+
+test('fichier devenu trop gros pendant l’évaluation d’une escalade : refus, aucune escalade ni empreinte', async () => {
+  const { db, deps, escalades } = monter({ avis: 'demander' });
+  let lectures = 0;
+  // Lu entier pendant l'évaluation, trop gros au calcul de l'empreinte de l'escalade.
+  deps.lireFichier = async () => (++lectures <= 2 ? 'echo ok' : TROP_GROS);
+  const s = await decider(deps, 'T-45', bash('bash outils/prepa.sh'));
+  assert.equal(decision(s), 'deny');
+  assert.equal(s.hookSpecificOutput.permissionDecisionReason, TROP_VOLUMINEUX);
+  assert.equal(lectures, 3);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM escalades').get() as { n: number }).n, 0);
+  assert.deepEqual(escalades, []);
+  assert.equal(lireTache(db, 'T-45').statut, 'en_cours');
+});
+
+const TROP_LONG_AVIS = 'contenu trop long pour l’avis du gardien (> 20 000 caractères) : validation humaine';
+const escaladeEnAttente = (db: ReturnType<typeof monter>['db']) =>
+  db.prepare('SELECT id, raison, statut FROM escalades').all() as { id: number; raison: string; statut: string }[];
+
+test('script de plus de 20 000 caractères exécuté : escalade sans avis, puis autorisation à usage unique', async () => {
+  const script = '/workspace/projet/outils/long.sh';
+  const { db, deps, demandes, escalades } = monter({ avis: 'autoriser', fichiers: { [script]: 'echo ok\n'.repeat(2_501) } });
+  const e = bash('bash outils/long.sh');
+  const s = await decider(deps, 'T-45', e);
+  assert.equal(decision(s), 'defer');
+  assert.equal(s.hookSpecificOutput.permissionDecisionReason, `en attente de validation : ${TROP_LONG_AVIS}`);
+  assert.equal(demandes.length, 0, 'Haiku n’est pas consulté');
+  assert.deepEqual(escalades, ['T-45']);
+  assert.equal(lireTache(db, 'T-45').statut, 'en_pause');
+  const [esc] = escaladeEnAttente(db);
+  assert.deepEqual([esc.raison, esc.statut], [TROP_LONG_AVIS, 'en_attente']);
+  deciderEscalade(db, cle, esc.id, 'approuver', 'lu en entier');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  assert.equal(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_1' })), 'allow');
+  assert.equal(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_2' })), 'defer', 'usage unique');
+  assert.equal(demandes.length, 0);
+});
+
+test('script long approuvé puis modifié au-delà des 20 000 premiers caractères : plus autorisé', async () => {
+  const script = '/workspace/projet/outils/long.sh';
+  const fichiers: Record<string, LectureControlee> = { [script]: 'echo ok\n'.repeat(2_501) };
+  const { db, deps } = monter({ avis: 'autoriser', fichiers });
+  const e = bash('bash outils/long.sh');
+  await decider(deps, 'T-45', e);
+  deciderEscalade(db, cle, escaladeEnAttente(db)[0].id, 'approuver', 'ok');
+  appliquer(db, 'T-45', { type: 'demarrage' });
+  fichiers[script] = `${'echo ok\n'.repeat(2_501)}echo fin modifiée\n`;
+  assert.notEqual(decision(await decider(deps, 'T-45', { ...e, tool_use_id: 'toolu_long_fin' })), 'allow');
+});
+
+test('package.json de plus de 20 000 caractères pour un script npm : escalade sans avis', async () => {
+  const pj = `{"scripts":{"test":"node t.js"},"description":"${'x'.repeat(20_000)}"}`;
+  const { db, deps, demandes } = monter({ avis: 'autoriser', fichiers: { '/workspace/projet/package.json': pj } });
+  const s = await decider(deps, 'T-45', bash('npm test'));
+  assert.equal(decision(s), 'defer');
+  assert.equal(demandes.length, 0);
+  assert.equal(escaladeEnAttente(db)[0].raison, TROP_LONG_AVIS);
+});
+
+test('fichier de dépendances illisible de plus de 20 000 caractères écrit : escalade sans avis', async () => {
+  const { db, deps, demandes } = monter({ avis: 'autoriser' });
+  const s = await decider(deps, 'T-45', ecrire('/workspace/projet/package.json', `{ illisible ${'x'.repeat(20_000)}`));
+  assert.equal(decision(s), 'defer');
+  assert.equal(demandes.length, 0);
+  assert.equal(escaladeEnAttente(db)[0].raison, TROP_LONG_AVIS);
+});
+
+test('contenus de 20 000 caractères au plus : avis consulté avec le contenu entier', async () => {
+  const script = '/workspace/projet/outils/pile.sh';
+  const contenu = 'echo ok\n'.repeat(2_500);
+  assert.equal(contenu.length, 20_000);
+  const { deps, demandes } = monter({ avis: 'autoriser', fichiers: { [script]: contenu } });
+  assert.equal(decision(await decider(deps, 'T-45', bash('bash outils/pile.sh'))), 'allow');
+  assert.equal(demandes.length, 1);
+  assert.equal(demandes[0].contenus[script], contenu);
+  const dep = monter({ avis: 'autoriser' });
+  const illisible = `{ ${'x'.repeat(19_998)}`;
+  assert.equal(decision(await decider(dep.deps, 'T-45', ecrire('/workspace/projet/package.json', illisible))), 'allow');
+  assert.equal(dep.demandes[0].contenus['/workspace/projet/package.json'], illisible);
 });

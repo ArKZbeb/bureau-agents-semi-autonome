@@ -21,3 +21,26 @@ test('surcharges par variables d’environnement', () => {
   assert.equal(c.urlApiAmont, 'http://127.0.0.1:9');
   assert.equal(c.cleApi, 'k');
 });
+
+test('modèles par agent : valeurs de la maquette, surcharge par variable', () => {
+  const c = chargerConfig({});
+  assert.deepEqual(c.modeles, {
+    cadreur: 'claude-opus-5-5', patron: 'claude-opus-5-5', implementeur: 'claude-sonnet-5-5',
+    reviewer: 'claude-sonnet-5-5', qa: 'claude-opus-5-5', controleur: 'claude-haiku-5-5',
+  });
+  assert.equal(c.tachesSimultanees, 2);
+  assert.equal(chargerConfig({ BUREAU_MODELE_QA: 'claude-sonnet-5-5' }).modeles.qa, 'claude-sonnet-5-5');
+});
+
+test('BUREAU_TACHES_SIMULTANEES : entier ≥ 1, sinon 2', () => {
+  assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: '3' }).tachesSimultanees, 3);
+  assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: '1' }).tachesSimultanees, 1);
+  for (const v of ['0', '-1', '1.5', 'abc', '', 'Infinity', 'NaN', ' '])
+    assert.equal(chargerConfig({ BUREAU_TACHES_SIMULTANEES: v }).tachesSimultanees, 2, `valeur « ${v} »`);
+});
+
+test('seuil de couverture par défaut 80, surcharge bornée', () => {
+  assert.equal(chargerConfig({}).seuilCouvertureLignes, 80);
+  assert.equal(chargerConfig({ BUREAU_SEUIL_COUVERTURE: '90' }).seuilCouvertureLignes, 90);
+  for (const v of ['-1', '101', 'abc', '']) assert.equal(chargerConfig({ BUREAU_SEUIL_COUVERTURE: v }).seuilCouvertureLignes, 80);
+});

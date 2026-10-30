@@ -17,8 +17,8 @@ import {
 } from './docker.ts';
 import { decoupeurLignes, lireLigne, type Fin } from './flux.ts';
 
-export type Agent = { nom: string; modele: string; maxTours: number; dureeMaxMs: number; promptSysteme: string };
-export type ResultatEtape = { issue: 'terminee'; resultat: string } | { issue: 'pause'; raison: RaisonPause } | { issue: 'bloquee'; raison: string };
+export type Agent = { nom: string; modele: string; maxTours: number; dureeMaxMs: number; promptSysteme: string; schema?: Record<string, unknown> };
+export type ResultatEtape = { issue: 'terminee'; resultat: string; sortie: unknown } | { issue: 'pause'; raison: RaisonPause } | { issue: 'bloquee'; raison: string };
 export type DepsExecution = {
   docker: Docker; db: Base; cle: Buffer; jetons: Jetons; evenements: EventEmitter; config: Config; racineDepot: string;
   enCours: Map<string, Docker.Container>;
@@ -46,11 +46,23 @@ function messageEscalade(db: Base, tacheId: string): string {
     : `J’ai refusé : ${appel}${e.commentaire ? ` (${e.commentaire})` : ''}. Ne le relance pas ; trouve une autre approche conforme au plan, ou arrête-toi en expliquant le blocage.`;
 }
 
-export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: Agent, prompt: string): Promise<ResultatEtape> {
+/** Sortie réseau par la passerelle seulement (conteneurs d'analyse : ni API ni gardien). */
+export function envSortie(jeton: string): string[] {
+  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
+  return [`HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle'];
+}
+
+// Aucun secret : ANTHROPIC_API_KEY porte le jeton de la tâche, que le proxy remplace par la vraie clé.
+export function envTache(jeton: string): string[] {
+  const passerelle = `http://passerelle:${PORT_INTERNE_PASSERELLE}`;
+  return [`ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`, ...envSortie(jeton)];
+}
+
+export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: Agent, prompt: string, options: { volume?: string } = {}): Promise<ResultatEtape> {
   const tache = lireTache(deps.db, tacheId);
   if (tache.statut !== 'prete') throw new Error(`${tacheId} n’est pas prête (${tache.statut})`);
   if (deps.enCours.has(tacheId)) throw new Error(`${tacheId} a déjà une étape en cours`);
-  const volume = nomRessource(tacheId);
+  const volume = options.volume ?? nomRessource(tacheId);
 
   // Contrôles d'intégrité avant chaque étape : toute anomalie met la tâche en pause, sans conteneur.
   let imageId: string;
@@ -61,7 +73,9 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     verifierJournal(deps.db, deps.cle);
     if (tache.reprise) {
       const transcript = await lireFichierVolume(deps.docker, imageId, volume, cheminTranscript(tache.reprise.sessionId));
-      if (sha256(transcript ?? '') !== tache.reprise.empreinteTranscript) throw new AnomalieIntegrite('transcript', 'transcript de session modifié pendant la pause');
+      // Illisible (absent, ou au-delà du plafond de lecture) : rien n'est vérifiable, jamais comparé comme vide.
+      if (transcript === null) throw new AnomalieIntegrite('transcript', 'transcript de session illisible : reprise impossible');
+      if (sha256(transcript) !== tache.reprise.empreinteTranscript) throw new AnomalieIntegrite('transcript', 'transcript de session modifié pendant la pause');
     }
   } catch (e) {
     if (e instanceof AnomalieIntegrite) return pauseIntegrite(deps, tacheId, e.message);
@@ -76,12 +90,11 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     '--permission-mode', 'default', '--append-system-prompt', agent.promptSysteme,
     // Réglages et serveurs MCP du dépôt ignorés : seuls comptent les managed settings et le fichier utilisateur vide.
     '--setting-sources', 'user', '--strict-mcp-config');
+  if (agent.schema) args.push('--json-schema', JSON.stringify(agent.schema));
   if (r) args.push('--resume', r.sessionId);
 
   appliquer(deps.db, tacheId, { type: 'demarrage' });
   const jeton = deps.jetons.creer(tacheId, agent.dureeMaxMs + 10 * 60_000);
-  const passerelle = `http://passerelle:${PORT_INTERNE_PASSERELLE}`;
-  const proxy = `http://tache:${jeton}@passerelle:${PORT_INTERNE_PASSERELLE}`;
   const suivi: Suivi = { fin: null, sessionId: r?.sessionId ?? null, outils: new Set(), resultats: new Set(), expire: false };
   let conteneur: Docker.Container | undefined;
   let minuteur: NodeJS.Timeout | undefined;
@@ -96,11 +109,7 @@ export async function lancerEtape(deps: DepsExecution, tacheId: string, agent: A
     const reseau = await preparerReseau(deps.docker, tacheId);
     const c = await creerConteneurAgent(deps.docker, {
       tacheId, imageId, reseau, volume, ressources: deps.config.conteneur, parametresVides: fichierParametresVides(deps.config.dossierDonnees),
-      // Aucun secret : ANTHROPIC_API_KEY porte le jeton de la tâche, que le proxy remplace par la vraie clé.
-      env: [
-        `ANTHROPIC_BASE_URL=${passerelle}`, `ANTHROPIC_API_KEY=${jeton}`, `BUREAU_JETON=${jeton}`,
-        `HTTPS_PROXY=${proxy}`, `HTTP_PROXY=${proxy}`, `https_proxy=${proxy}`, `http_proxy=${proxy}`, 'NO_PROXY=passerelle', 'no_proxy=passerelle',
-      ],
+      env: envTache(jeton),
     });
     conteneur = c;
     deps.enCours.set(tacheId, c);
@@ -184,5 +193,5 @@ async function conclure(deps: DepsExecution, tacheId: string, agent: Agent, imag
     return { issue: 'pause', raison: 'erreur_api' };
   }
   definirReprise(deps.db, tacheId, null);
-  return { issue: 'terminee', resultat: s.fin.resultat };
+  return { issue: 'terminee', resultat: s.fin.resultat, sortie: s.fin.sortie };
 }

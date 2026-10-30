@@ -64,9 +64,17 @@ Multijoueur, déploiement serveur, docker compose, merge automatique, autres sta
 
 ## Commandes
 
-- Installation : `npm ci` (les scripts npm passent par Git Bash, voir `.npmrc`).
+- Installation : `npm ci` (les scripts npm passent par Git Bash, voir `.npmrc`). Sous Linux, préfixer les commandes npm de
+  `npm_config_script_shell=/bin/bash` (le `.npmrc` vise Git Bash sous Windows ; ne pas le modifier).
+- Linux avec Docker Desktop installé : exporter `DOCKER_HOST=unix:///var/run/docker.sock`, pour que `npm run image` (CLI docker)
+  et dockerode visent le même démon. Le serveur des conteneurs écoute sur 127.0.0.1 et sur la passerelle du pont Docker
+  (jamais 0.0.0.0) ; `BUREAU_ADRESSE_CONTENEURS` la remplace (IPv4 privée seulement).
 - Proxy TLS d'entreprise : copier le certificat racine dans `conteneur/certificats/entreprise.crt` (non versionné) et lancer
   Node avec `NODE_EXTRA_CA_CERTS` pointant vers ce certificat.
 - Image des agents + manifeste signé : `npm run image` (à relancer après toute modification de `agents/` ou `conteneur/`).
-- Tests sans Docker : `npm test` ; types : `npm run typecheck` ; tests avec Docker : `npm run test:docker`.
-- Lancement : `ANTHROPIC_API_KEY=… npm run demarrer` (serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311).
+- Tests sans Docker : `npm test` ; types : `npm run typecheck` ; tests avec Docker : `npm run test:docker` (lent : plusieurs minutes ; relancer `npm run image` avant si `agents/` ou
+  `conteneur/` ont changé).
+- Analyse de review : outils (Semgrep, gitleaks, dotnet, Angular) dans l'image des agents, lancés par l'orchestrateur dans deux conteneurs durcis
+  (`mesurer.sh` puis `tester.sh`) ; toute modification de `conteneur/analyse/` exige `npm run image`.
+- Panneau web : `npm --prefix web ci` (première fois), `npm run web:build` (à relancer après toute modification de `web/`), tests `npm run test:web`. Le front Angular 21 a son propre `package.json` (TypeScript 5.9) ; la racine reste en TypeScript 6.
+- Lancement : `ANTHROPIC_API_KEY=… npm run demarrer`, puis ouvrir le lien affiché (`http://127.0.0.1:4310/#jeton=…`) ; serveurs sur 127.0.0.1:4310 et 127.0.0.1:4311.

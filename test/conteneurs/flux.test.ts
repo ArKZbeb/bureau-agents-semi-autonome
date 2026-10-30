@@ -15,11 +15,19 @@ test('événements extraits des lignes', () => {
   assert.deepEqual(lireLigne(ASSISTANT), [
     { type: 'outil', id: 'toolu_1', nom: 'Bash', entree: { command: 'git status' } }, { type: 'texte', texte: 'je vérifie' }]);
   assert.deepEqual(lireLigne(RESULTAT), [{ type: 'resultat_outil', id: 'toolu_1', contenu: 'Exit code 1', erreur: true }]);
-  assert.deepEqual(lireLigne(DIFFERE), [{ type: 'fin', sessionId: '43c06cbc', sousType: 'success', stopReason: 'tool_deferred', erreur: false, apiErrorStatus: null, resultat: '', differe: { id: 'toolu_4', nom: 'Bash', entree: { command: 'npm install csv-parsr@0.1.2' } } }]);
+  assert.deepEqual(lireLigne(DIFFERE), [{ type: 'fin', sessionId: '43c06cbc', sousType: 'success', stopReason: 'tool_deferred', erreur: false, apiErrorStatus: null, resultat: '', sortie: null, differe: { id: 'toolu_4', nom: 'Bash', entree: { command: 'npm install csv-parsr@0.1.2' } } }]);
   assert.equal((lireLigne(ERREUR)[0] as { apiErrorStatus: number }).apiErrorStatus, 403);
   assert.deepEqual(lireLigne('pas du json'), []);
   assert.deepEqual(lireLigne('{"type":"assistant","message":{"content":null}}'), []);
   assert.deepEqual(lireLigne('{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"..."}]}}'), []);
+});
+
+test('sortie structurée lue dans la ligne result', () => {
+  const ligne = JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1', is_error: false, result: '', structured_output: { resume: 'ok' } });
+  const [fin] = lireLigne(ligne);
+  assert.deepEqual((fin as { sortie: unknown }).sortie, { resume: 'ok' });
+  const sans = JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1', is_error: false, result: 'x' });
+  assert.equal((lireLigne(sans)[0] as { sortie: unknown }).sortie, null);
 });
 
 test('découpage en lignes malgré des morceaux coupés au milieu d’un caractère', () => {

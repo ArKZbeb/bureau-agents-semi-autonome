@@ -13,7 +13,7 @@ import { construireImage } from '../src/conteneurs/image.ts';
 import { LABEL_TACHE, lireFichierVolume, nomRessource, RACINE_PROJET } from '../src/conteneurs/docker.ts';
 import { cheminTranscript, type Agent } from '../src/conteneurs/execution.ts';
 import { demarrerOrchestrateur, type Orchestrateur } from '../src/orchestrateur.ts';
-import { lireTache } from '../src/taches/depot.ts';
+import { definirAgent, lireTache } from '../src/taches/depot.ts';
 import type { ClientAvis } from '../src/gardien/avis.ts';
 import { demarrerFausseApi, type FausseApi, type Tour } from '../test/outils/fausse-api.ts';
 
@@ -64,10 +64,13 @@ async function monterBanc(T: string, tours: Tour[], avis: (demande: string) => '
     config, racineDepot: RACINE_DEPOT, docker, clientAvis, fetchDependances,
     surOutil: (_t, c) => void c.inspect().then(i => envConteneurs.push(i.Config.Env), () => {}),
   });
+  await o.ordonnanceur.arreter(); // ce test pilote l'étape lui-même : pas d'ordonnanceur en parallèle
   const supprimerVolume = () => docker.getVolume(nomRessource(T)).remove({ force: true }).catch(() => {});
   try {
-    await o.creerTache({ id: T, projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: depotPiege(fichiersEnPlus), budgetUsd });
+    await o.creerTache({ id: T, projet: 'Film', titre: 'Export PDF de la fiche film', cheminProjet: depotPiege(fichiersEnPlus), budgetUsd, demande: 'Exporter la fiche film en PDF' });
     o.validerArtefact(T, 'plan', PLAN);
+    // Comme le pipeline : l'agent de l'étape est déclaré à l'orchestrateur (sans agent, le gardien refuse Write et Edit).
+    definirAgent(o.db, T, AGENT.nom);
   } catch (e) {
     // Sans ce nettoyage, les serveurs restent ouverts : les ports sont pris et la suite ne se termine jamais.
     await o.arreter();

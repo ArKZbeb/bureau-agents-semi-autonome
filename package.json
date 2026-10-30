@@ -11,7 +11,9 @@
     "test:docker": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 --test-timeout=900000 \"test-docker/**/*.test.ts\"",
     "typecheck": "tsc -p .",
     "image": "node --disable-warning=ExperimentalWarning scripts/construire-image.ts",
-    "demarrer": "node --disable-warning=ExperimentalWarning src/index.ts"
+    "demarrer": "node --disable-warning=ExperimentalWarning src/index.ts",
+    "web:build": "npm --prefix web run build",
+    "test:web": "npm --prefix web test -- --watch=false"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

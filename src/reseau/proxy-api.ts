@@ -69,7 +69,8 @@ const POINTS_AUTORISES = new Set(['/v1/messages', '/v1/messages/count_tokens']);
 
 export async function relayerApi(deps: DepsProxyApi, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const jeton = (req.headers['x-api-key'] as string | undefined) ?? req.headers.authorization?.replace(/^Bearer /, '');
-  const tacheId = deps.jetons.valider(jeton);
+  // Jeton d'un conteneur d'analyse (portée « sortie ») : aucun accès à l'API.
+  const tacheId = deps.jetons.valider(jeton, 'agent');
   if (!tacheId) return erreurApi(res, 401, 'authentication_error', 'jeton de tâche invalide ou expiré');
   const chemin = new URL(req.url ?? '/', 'http://proxy.local').pathname;
   if (req.method !== 'POST' || !POINTS_AUTORISES.has(chemin)) return erreurApi(res, 404, 'not_found_error', 'point d’accès non autorisé');

@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { transition, TransitionInvalide, type EtatTache, type Evenement } from '../../src/taches/etats.ts';
+import { transition, TransitionInvalide, RAISON_PROPOSITION, RAISON_QUESTIONS, type EtatTache, type Evenement } from '../../src/taches/etats.ts';
 
 const initial: EtatTache = { etape: 'cadrage', statut: 'prete', raison: null, echangesPlan: 0, essaisQa: 0 };
 const suite = (e: EtatTache, ...evs: Evenement[]) => evs.reduce(transition, e);
 const finir = (verdict?: 'ok' | 'objection' | 'go' | 'no_go'): Evenement[] => [{ type: 'demarrage' }, { type: 'etape_terminee', verdict }];
+const cadrageValide: Evenement[] = [{ type: 'demarrage' }, { type: 'etape_terminee', verdict: 'proposition' }, { type: 'validation_cadrage' }];
 
 test('parcours nominal jusqu’à la validation', () => {
-  const e = suite(initial, ...finir(), ...finir('ok'), ...finir(), ...finir(), ...finir(), ...finir('go'));
+  const e = suite(initial, ...cadrageValide, ...finir('ok'), ...finir(), ...finir(), ...finir(), ...finir('go'));
   assert.equal(e.etape, 'validation');
   assert.equal(e.statut, 'attente_humain');
   assert.equal(suite(e, { type: 'validation', decision: 'pr' }).statut, 'terminee');
@@ -15,12 +16,34 @@ test('parcours nominal jusqu’à la validation', () => {
 });
 
 test('objections du patron : deux échanges puis arbitrage humain', () => {
-  let e = suite(initial, ...finir(), ...finir('objection'));
+  let e = suite(initial, ...cadrageValide, ...finir('objection'));
   assert.deepEqual([e.etape, e.statut, e.echangesPlan], ['cadrage', 'prete', 1]);
-  e = suite(e, ...finir(), ...finir('objection'));
+  e = suite(e, ...cadrageValide, ...finir('objection'));
   assert.deepEqual([e.etape, e.statut, e.echangesPlan], ['patron_plan', 'attente_humain', 2]);
   assert.equal(suite(e, { type: 'arbitrage', choix: 'cadreur' }).etape, 'implementation');
   assert.equal(suite(e, { type: 'arbitrage', choix: 'alternative' }).etape, 'cadrage');
+});
+
+test('cadrage : questions, réponse, proposition, validation', () => {
+  let e = suite(initial, { type: 'demarrage' }, { type: 'etape_terminee', verdict: 'questions' });
+  assert.deepEqual([e.etape, e.statut, e.raison], ['cadrage', 'attente_humain', RAISON_QUESTIONS]);
+  assert.throws(() => suite(e, { type: 'validation_cadrage' }), TransitionInvalide);
+  e = suite(e, { type: 'reponse_cadrage' });
+  assert.deepEqual([e.etape, e.statut], ['cadrage', 'prete']);
+  e = suite(e, { type: 'demarrage' }, { type: 'etape_terminee', verdict: 'proposition' });
+  assert.deepEqual([e.statut, e.raison], ['attente_humain', RAISON_PROPOSITION]);
+  assert.deepEqual([suite(e, { type: 'reponse_cadrage' }).etape, suite(e, { type: 'reponse_cadrage' }).statut], ['cadrage', 'prete']);
+  e = suite(e, { type: 'validation_cadrage' });
+  assert.deepEqual([e.etape, e.statut, e.raison], ['patron_plan', 'prete', null]);
+});
+
+test('cadrage : fin sans questions ni proposition refusée, portes refusées hors cadrage', () => {
+  const enCours = suite(initial, { type: 'demarrage' });
+  assert.throws(() => suite(enCours, { type: 'etape_terminee' }), TransitionInvalide);
+  assert.throws(() => suite(enCours, { type: 'etape_terminee', verdict: 'ok' }), TransitionInvalide);
+  const patron: EtatTache = { ...initial, etape: 'patron_plan', statut: 'attente_humain', raison: RAISON_PROPOSITION };
+  assert.throws(() => suite(patron, { type: 'validation_cadrage' }), TransitionInvalide);
+  assert.throws(() => suite(patron, { type: 'reponse_cadrage' }), TransitionInvalide);
 });
 
 test('trois no-go : la tâche me revient', () => {

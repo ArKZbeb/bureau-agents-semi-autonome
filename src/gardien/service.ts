@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { LectureControlee, TropGros } from '../conteneurs/docker.ts';
 import type { Base } from '../db.ts';
 import { AnomalieIntegrite } from '../integrite/anomalie.ts';
 import { lireArtefact } from '../integrite/artefacts.ts';
@@ -18,7 +19,8 @@ export type SortieHook = {
 };
 export type DepsGardien = {
   db: Base; cle: Buffer;
-  lireFichier: (tacheId: string, chemin: string) => Promise<string | null>;
+  /** Au-delà du plafond de lecture, « trop gros » : jamais un extrait, qui serait jugé comme le fichier entier. */
+  lireFichier: (tacheId: string, chemin: string) => Promise<LectureControlee>;
   /** Chemin absolu après résolution des liens symboliques dans l'espace de la tâche ; null si impossible. */
   resoudreChemin: (tacheId: string, chemin: string) => Promise<string | null>;
   avis: (demande: DemandeAvis) => Promise<Avis>;
@@ -30,17 +32,24 @@ export type DepsGardien = {
 type Decision = { decision: 'Autorisé' | 'Refusé' | 'Escaladé'; decideur: string; couche: Couche; raison: string };
 type Contexte = { tacheId: string; titre: string; plan: string | null; zones: string[] };
 
-const OUTILS_INTERNES = new Set(['Task', 'Agent', 'TodoWrite', 'ToolSearch', 'Skill', 'TaskStop']);
+export const OUTIL_SORTIE = 'StructuredOutput';
+const OUTILS_INTERNES = new Set(['Task', 'Agent', 'TodoWrite', 'ToolSearch', 'Skill', 'TaskStop', OUTIL_SORTIE]);
 const OUTILS_LECTURE = new Set(['Read', 'Glob', 'Grep', 'LS']);
 const OUTILS_ECRITURE = new Set(['Write', 'Edit']);
+// Droit d'écriture imposé hors de l'agent : le cadreur (spec et plan) et l'implémenteur gardent Write et Edit.
+export const AGENTS_ECRITURE = new Set(['implementeur', 'cadreur']);
+export const FICHIERS_CADRAGE = new Set(['/workspace/cadrage/spec.md', '/workspace/cadrage/plan.md']);
+/** Au-delà, un contenu n'est pas soumis à l'avis (Haiku jugerait sans voir la fin) : validation humaine. */
 const MAX_CONTENU = 20_000;
 const SCRIPTS_NPM = /\bnpm\s+(run|run-script|test|start)\b/;
 const SECRETS_MOTIF = /(^|[\/*])\.env|id_(rsa|ed25519|ecdsa|dsa)|\.ssh|\.aws|\.azure|\.git-credentials|\.netrc|\.(pem|pfx|p12|key)\b|secrets\.json/i;
 const PAUSE = 'tâche en pause : rien ne passe tant que je n’ai pas décidé';
+const TROP_VOLUMINEUX = 'fichier trop volumineux pour être contrôlé (> 5 Mo)';
 
 const enPause = (): Decision => ({ decision: 'Refusé', decideur: 'Orchestrateur', couche: '—', raison: PAUSE });
 const refusListe = (raison: string): Decision => ({ decision: 'Refusé', decideur: 'Liste noire', couche: '2', raison });
 const estChaine = (v: unknown): v is string => typeof v === 'string';
+const tropGros = (lu: LectureControlee): lu is TropGros => typeof lu === 'object' && lu !== null;
 const enCours = (deps: DepsGardien, tacheId: string) => lireTache(deps.db, tacheId).statut === 'en_cours';
 
 // Seuls les champs qui changent l'effet de l'appel comptent (la « description » d'un Bash peut varier).
@@ -53,8 +62,9 @@ function champsSignificatifs(outil: string, entree: Record<string, unknown>): un
 export const empreinteAppel = (outil: string, entree: Record<string, unknown>) => sha256(`${outil}\n${JSON.stringify(champsSignificatifs(outil, entree))}`);
 
 // Une autorisation vaut pour un effet : le contenu des fichiers que l'appel exécute ou modifie y entre aussi.
-async function empreinteEffective(deps: DepsGardien, tacheId: string, outil: string, entree: Record<string, unknown>): Promise<string> {
-  const lus: [string, string | null][] = [];
+// null : un de ces fichiers est trop gros pour être lu entier ; aucune empreinte n'est calculée sur un extrait.
+async function empreinteEffective(deps: DepsGardien, tacheId: string, outil: string, entree: Record<string, unknown>): Promise<string | null> {
+  const lus: [string, LectureControlee][] = [];
   if (outil === 'Bash') {
     const commande = String(entree.command ?? '');
     for (const f of fichiersExecutes(commande)) {
@@ -66,6 +76,7 @@ async function empreinteEffective(deps: DepsGardien, tacheId: string, outil: str
     const chemin = path.posix.resolve(RACINE, String(entree.file_path));
     lus.push([chemin, await deps.lireFichier(tacheId, chemin)]);
   }
+  if (lus.some(([, lu]) => tropGros(lu))) return null;
   return sha256(JSON.stringify([outil, champsSignificatifs(outil, entree), lus]));
 }
 
@@ -87,7 +98,11 @@ export async function decider(deps: DepsGardien, tacheId: string, e: EntreeHook)
   let empreinte = '';
   try {
     d = await evaluer(deps, tacheId, outil, entree);
-    if (d.decision === 'Escaladé') empreinte = await empreinteEffective(deps, tacheId, outil, entree);
+    if (d.decision === 'Escaladé') {
+      const e = await empreinteEffective(deps, tacheId, outil, entree);
+      if (e === null) d = refusListe(TROP_VOLUMINEUX);
+      else empreinte = e;
+    }
   } catch (err) {
     d = { decision: 'Refusé', decideur: 'Gardien', couche: '—', raison: `erreur du gardien : ${(err as Error).message}` };
   }
@@ -132,6 +147,17 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   }
   const ctx: Contexte = { tacheId, titre: tache.titre, plan, zones: zonesDuPlan(plan) };
 
+  // Droit d'écriture par agent : après le contrôle d'intégrité du plan, pour qu'une altération arrête aussi ces appels.
+  // Sans agent déclaré, lecture seule (fail-closed).
+  if (OUTILS_ECRITURE.has(outil) && (tache.agent === null || !AGENTS_ECRITURE.has(tache.agent)))
+    return refusListe('agent en lecture seule : Write et Edit retirés');
+  if (OUTILS_ECRITURE.has(outil) && tache.agent === 'cadreur') {
+    const chemin = path.posix.resolve(RACINE, String(entree.file_path));
+    if (!FICHIERS_CADRAGE.has(chemin)) return refusListe('le cadreur n’écrit que spec.md et plan.md');
+    if ((await deps.resoudreChemin(tacheId, chemin)) !== chemin) return refusListe('écriture via un lien symbolique');
+    return { decision: 'Autorisé', decideur: 'Liste blanche', couche: '2', raison: 'document du cadreur' };
+  }
+
   // Un lien du dépôt (src/x → ../.git/hooks/pre-commit) ne doit pas déguiser la cible réelle.
   const ecriture = OUTILS_ECRITURE.has(outil);
   const demande = path.posix.resolve(RACINE, String(ecriture ? entree.file_path : entree.file_path ?? entree.path ?? RACINE));
@@ -147,6 +173,7 @@ async function evaluer(deps: DepsGardien, tacheId: string, outil: string, entree
   }
 
   const empreinte = await empreinteEffective(deps, tacheId, outil, entree);
+  if (empreinte === null) return refusListe(TROP_VOLUMINEUX);
   const auto = deps.db.prepare('SELECT decision FROM autorisations WHERE tache_id = ? AND empreinte_appel = ? AND utilisee = 0').get(tacheId, empreinte) as { decision: 'allow' | 'deny' } | undefined;
   if (auto) {
     deps.db.prepare('UPDATE autorisations SET utilisee = 1 WHERE tache_id = ? AND empreinte_appel = ?').run(tacheId, empreinte);
@@ -180,13 +207,15 @@ async function evaluerAppelBash(deps: DepsGardien, ctx: Contexte, commande: stri
     const chemin = path.posix.resolve(RACINE, f);
     const contenu = await deps.lireFichier(ctx.tacheId, chemin);
     if (contenu === null) continue;
+    if (tropGros(contenu)) return refusListe(TROP_VOLUMINEUX);
     const danger = evaluerContenu(chemin, contenu, true);
     if (danger) return depuis(danger);
-    contenus[chemin] = contenu.slice(0, MAX_CONTENU);
+    contenus[chemin] = contenu;
   }
   if (SCRIPTS_NPM.test(commande)) {
     const pj = await deps.lireFichier(ctx.tacheId, `${RACINE}/package.json`);
-    if (pj) contenus[`${RACINE}/package.json`] = pj.slice(0, MAX_CONTENU);
+    if (tropGros(pj)) return refusListe(TROP_VOLUMINEUX);
+    if (pj) contenus[`${RACINE}/package.json`] = pj;
   }
   return avecAvis(deps, ctx, { outil: 'Bash', entree: { command: commande } }, v.raison, dependancesCommande(commande), contenus);
 }
@@ -204,14 +233,17 @@ async function evaluerEcriture(deps: DepsGardien, ctx: Contexte, outil: string, 
   const chemin = path.posix.resolve(RACINE, String(entree.file_path));
   const v = evaluerFichier(chemin, 'ecriture', RACINE, ctx.zones);
   if (v.decision !== 'Autorisé') return depuis(v);
-  const avant = await deps.lireFichier(ctx.tacheId, chemin);
+  const lu = await deps.lireFichier(ctx.tacheId, chemin);
+  // Trop gros : un Edit ne peut pas être contrôlé ; un Write est jugé sur son seul contenu, l'ancien compté comme absent.
+  if (tropGros(lu) && outil === 'Edit') return refusListe(TROP_VOLUMINEUX);
+  const avant = tropGros(lu) ? null : lu;
   const apres = contenuApres(outil, entree, avant);
   if (apres === null) return refusListe('fichier illisible : modification impossible à contrôler');
   const danger = evaluerContenu(chemin, apres);
   if (danger) return depuis(danger);
   const nouvelles = dependancesFichier(chemin, avant, apres);
   const appel = { outil, entree: { file_path: chemin } };
-  if (nouvelles === null) return avecAvis(deps, ctx, appel, 'fichier de dépendances illisible', [], { [chemin]: apres.slice(0, MAX_CONTENU) });
+  if (nouvelles === null) return avecAvis(deps, ctx, appel, 'fichier de dépendances illisible', [], { [chemin]: apres });
   if (nouvelles.length) return avecAvis(deps, ctx, appel, `modification de ${path.posix.basename(chemin)}`, nouvelles, {});
   return depuis(v);
 }
@@ -220,6 +252,9 @@ async function avecAvis(deps: DepsGardien, ctx: Contexte, appel: DemandeAvis['ap
   const fiches = await Promise.all(dependances.map(d => deps.fiche(d)));
   const absente = fiches.find(f => f.existe === false);
   if (absente) return { decision: 'Refusé', decideur: 'Gardien', couche: '3', raison: `paquet introuvable sur ${absente.ecosysteme} : ${absente.nom}` };
+  // Jamais d'extrait soumis à l'avis : un contenu trop long passe en validation humaine (escalade, comme un doute de l'avis).
+  if (Object.values(contenus).some(c => c.length > MAX_CONTENU))
+    return { decision: 'Escaladé', decideur: 'Gardien', couche: '3', raison: 'contenu trop long pour l’avis du gardien (> 20 000 caractères) : validation humaine' };
   if (!enCours(deps, ctx.tacheId)) return enPause();
   const avis = await deps.avis({
     tache: { id: ctx.tacheId, titre: ctx.titre }, plan: ctx.plan, appel,

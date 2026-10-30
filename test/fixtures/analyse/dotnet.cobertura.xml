@@ -1,0 +1,101 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<coverage line-rate="0.47368421052631576" branch-rate="0.3333333333333333" complexity="7" version="1.9" timestamp="1793321047" lines-covered="9" lines-valid="19" branches-covered="2" branches-valid="6">
+  <packages>
+    <package line-rate="0.8333333333333334" branch-rate="1" complexity="1" name="Demo.Tests">
+      <classes>
+        <class line-rate="0.8333333333333334" branch-rate="1" complexity="1" name="Demo.Tests.RemiseTests" filename="/workspace/projet/tests/Demo.Tests/RemiseTests.cs">
+          <methods>
+            <method line-rate="1" branch-rate="1" complexity="1" name="Appliquer_RetireLeTaux" signature="()">
+              <lines>
+                <line number="9" hits="1" branch="False" />
+                <line number="10" hits="1" branch="False" />
+                <line number="11" hits="1" branch="False" />
+              </lines>
+            </method>
+            <method line-rate="0.6666666666666666" branch-rate="1" complexity="1" name="Appliquer_TauxNul_Echoue" signature="()">
+              <lines>
+                <line number="15" hits="1" branch="False" />
+                <line number="16" hits="1" branch="False" />
+                <line number="17" hits="0" branch="False" />
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="9" hits="1" branch="False" />
+            <line number="10" hits="1" branch="False" />
+            <line number="11" hits="1" branch="False" />
+            <line number="15" hits="1" branch="False" />
+            <line number="16" hits="1" branch="False" />
+            <line number="17" hits="0" branch="False" />
+          </lines>
+        </class>
+      </classes>
+    </package>
+    <package line-rate="0.3076923076923077" branch-rate="0.3333333333333333" complexity="6" name="Demo.Lib">
+      <classes>
+        <class line-rate="0.3076923076923077" branch-rate="0.3333333333333333" complexity="6" name="Demo.Lib.Remise" filename="/workspace/projet/src/Demo.Lib/Remise.cs">
+          <methods>
+            <method line-rate="0.6666666666666666" branch-rate="0.5" complexity="4" name="Appliquer" signature="(decimal, decimal)">
+              <lines>
+                <line number="8" hits="1" branch="False" />
+                <line number="9" hits="1" branch="True" condition-coverage="50% (2/4)">
+                  <conditions>
+                    <condition number="0" type="jump" coverage="50%" />
+                    <condition number="1" type="jump" coverage="50%" />
+                  </conditions>
+                </line>
+                <line number="10" hits="0" branch="False" />
+                <line number="11" hits="0" branch="False" />
+                <line number="13" hits="1" branch="False" />
+                <line number="14" hits="1" branch="False" />
+              </lines>
+            </method>
+            <method line-rate="0" branch-rate="0" complexity="2" name="Plafonner" signature="(decimal, decimal)">
+              <lines>
+                <line number="17" hits="0" branch="False" />
+                <line number="18" hits="0" branch="True" condition-coverage="0% (0/2)">
+                  <conditions>
+                    <condition number="0" type="jump" coverage="0%" />
+                  </conditions>
+                </line>
+                <line number="19" hits="0" branch="False" />
+              </lines>
+            </method>
+            <method line-rate="0" branch-rate="1" complexity="1" name="CodeValide" signature="(string, string)">
+              <lines>
+                <line number="22" hits="0" branch="False" />
+                <line number="23" hits="0" branch="False" />
+                <line number="24" hits="0" branch="False" />
+                <line number="25" hits="0" branch="False" />
+              </lines>
+            </method>
+          </methods>
+          <lines>
+            <line number="8" hits="1" branch="False" />
+            <line number="9" hits="1" branch="True" condition-coverage="50% (2/4)">
+              <conditions>
+                <condition number="0" type="jump" coverage="50%" />
+                <condition number="1" type="jump" coverage="50%" />
+              </conditions>
+            </line>
+            <line number="10" hits="0" branch="False" />
+            <line number="11" hits="0" branch="False" />
+            <line number="13" hits="1" branch="False" />
+            <line number="14" hits="1" branch="False" />
+            <line number="17" hits="0" branch="False" />
+            <line number="18" hits="0" branch="True" condition-coverage="0% (0/2)">
+              <conditions>
+                <condition number="0" type="jump" coverage="0%" />
+              </conditions>
+            </line>
+            <line number="19" hits="0" branch="False" />
+            <line number="22" hits="0" branch="False" />
+            <line number="23" hits="0" branch="False" />
+            <line number="24" hits="0" branch="False" />
+            <line number="25" hits="0" branch="False" />
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>

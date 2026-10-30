@@ -1,0 +1,22 @@
+[
+ {
+  "RuleID": "aws-access-token",
+  "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms.",
+  "StartLine": 2,
+  "EndLine": 2,
+  "StartColumn": 20,
+  "EndColumn": 39,
+  "Match": "<retiré>",
+  "Secret": "<retiré>",
+  "File": "config/aws.env",
+  "SymlinkFile": "",
+  "Commit": "2f9c4c7206a96d7c7f145a4a26034c983d2d1129",
+  "Entropy": 4.0841837,
+  "Author": "spike",
+  "Email": "spike@exemple.invalid",
+  "Date": "2026-10-30T00:38:21Z",
+  "Message": "remise : garde sur le taux, code promo, config",
+  "Tags": [],
+  "Fingerprint": "2f9c4c7206a96d7c7f145a4a26034c983d2d1129:config/aws.env:aws-access-token:2"
+ }
+]

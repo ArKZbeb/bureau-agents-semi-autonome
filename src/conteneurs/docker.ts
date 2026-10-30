@@ -6,6 +6,8 @@ import { AnomalieIntegrite } from '../integrite/anomalie.ts';
 
 export const RACINE_PROJET = '/workspace/projet';
 export const DOSSIER_ETAT = '/workspace/.etat-claude';
+/** Documents du cadreur (spec, plan), hors du dépôt git. */
+export const DOSSIER_CADRAGE = '/workspace/cadrage';
 export const PORT_INTERNE_PASSERELLE = 4311;
 export const NOM_PASSERELLE = 'bureau-passerelle';
 export const LABEL_TACHE = 'bureau.tache';
@@ -17,6 +19,8 @@ export type Ressources = { memoire: number; cpus: number; pids: number };
 const DURCISSEMENT = { ReadonlyRootfs: true, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], Privileged: false, Init: true };
 
 export const nomRessource = (tacheId: string) => `bureau-${tacheId.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+export const brancheTache = (tacheId: string) => `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
+export const nomCopie = (tacheId: string) => `${nomRessource(tacheId)}-controle`;
 const codeHttp = (e: unknown) => (e as { statusCode?: number }).statusCode;
 
 export async function verifierDocker(docker: Docker): Promise<void> {
@@ -110,17 +114,17 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
   const existe = await docker.getVolume(volume).inspect().then(() => true, (e: unknown) => { if (codeHttp(e) === 404) return false; throw e; });
   if (existe) throw new Error(`l’espace de ${tacheId} existe déjà`);
   await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
-  const branche = `task/${tacheId.replace(/^T-/i, '').toLowerCase()}`;
+  const branche = brancheTache(tacheId);
   const script = [
     // La source montée appartient à un autre uid : exception déclarée dans un HOME jetable (-c n'est pas honoré par git clone).
     'export HOME=/tmp',
     `git config --global --add safe.directory '*'`,
     `git clone --quiet --no-hardlinks /source ${RACINE_PROJET}`,
     `cd ${RACINE_PROJET}`,
-    `git checkout --quiet -b ${branche}`,
+    `git checkout --quiet -b '${branche}'`,
     `git config user.name "Bureau d'agents"`,
     'git config user.email bureau@localhost',
-    `mkdir -p ${DOSSIER_ETAT}`,
+    `mkdir -p ${DOSSIER_ETAT} ${DOSSIER_CADRAGE}`,
   ].join(' && ');
   const r = await executerJetable(docker, imageId, ['sh', '-c', script], [
     { Type: 'volume', Source: volume, Target: '/workspace' },
@@ -134,14 +138,50 @@ export async function preparerEspace(docker: Docker, imageId: string, tacheId: s
 }
 
 const cheminConfine = (chemin: string) => path.posix.normalize(chemin).startsWith('/workspace/');
-// Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, plafonne à 5 Mo.
-const commandeLecture = (chemin: string) => ['sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c 5242880 -- "$p"', 'lecture', chemin];
-
-export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string): Promise<string | null> {
-  if (!cheminConfine(chemin)) return null;
-  const r = await executerJetable(docker, imageId, commandeLecture(chemin), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
-  return r.code === 0 ? r.stdout.toString('utf8') : null;
+// SHA de HEAD du dépôt d'un volume, lu en lecture seule ; HOME=/tmp et safe.directory évitent toute dépendance à la configuration du dépôt.
+export async function lireShaVolume(docker: Docker, imageId: string, volume: string): Promise<string | null> {
+  const script = `export HOME=/tmp && git config --global --add safe.directory '*' && git -C ${RACINE_PROJET} rev-parse HEAD`;
+  const r = await executerJetable(docker, imageId, ['sh', '-c', script], [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  const sha = r.stdout.toString('utf8').trim();
+  return r.code === 0 && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
 }
+
+/** Plafond des lectures ordinaires (transcripts, documents du cadreur). */
+export const PLAFOND_LECTURE = 5 * 1024 ** 2;
+/** Plafond des fichiers d'analyse (diff.patch, Cobertura, rapports) : un fichier tronqué fausserait les mesures. */
+export const PLAFOND_ANALYSE = 64 * 1024 ** 2;
+
+/** Fichier au-delà du plafond, pour le gardien : jamais un extrait, que le gardien jugerait comme s'il était complet. */
+export type TropGros = { readonly tropGros: true };
+export const TROP_GROS: TropGros = Object.freeze({ tropGros: true });
+/** Contenu, null (illisible, absent, hors de /workspace) ou « trop gros ». */
+export type LectureControlee = string | null | TropGros;
+
+// Résout les liens, refuse tout ce qui n'est pas un fichier régulier sous /workspace, lit au plus plafond + 1 octets.
+const commandeLecture = (chemin: string, plafond: number) => [
+  'sh', '-c', 'p=$(readlink -f -- "$1") || exit 3; case "$p" in /workspace/*) ;; *) exit 3;; esac; [ -f "$p" ] || exit 3; exec head -c "$2" -- "$p"',
+  'lecture', chemin, String(plafond + 1),
+];
+const contenuLu = (code: number, sortie: Buffer, plafond: number): LectureControlee => {
+  if (code !== 0) return null;
+  return sortie.length <= plafond ? sortie.toString('utf8') : TROP_GROS;
+};
+
+async function lireVolume(docker: Docker, imageId: string, volume: string, chemin: string, plafond: number): Promise<LectureControlee> {
+  if (!cheminConfine(chemin)) return null;
+  const r = await executerJetable(docker, imageId, commandeLecture(chemin, plafond), [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: true }]);
+  return contenuLu(r.code, r.stdout, plafond);
+}
+
+/** Au-delà du plafond, null : jamais un contenu tronqué présenté comme complet. */
+export async function lireFichierVolume(docker: Docker, imageId: string, volume: string, chemin: string, plafond = PLAFOND_LECTURE): Promise<string | null> {
+  const lu = await lireVolume(docker, imageId, volume, chemin, plafond);
+  return typeof lu === 'string' ? lu : null;
+}
+
+/** Lecture du gardien sur le volume d'une tâche arrêtée : au-delà du plafond ordinaire, « trop gros ». */
+export const lireFichierVolumeControle = (docker: Docker, imageId: string, volume: string, chemin: string): Promise<LectureControlee> =>
+  lireVolume(docker, imageId, volume, chemin, PLAFOND_LECTURE);
 
 // readlink -m : résout tous les liens, même si la cible finale n'existe pas encore (fichier à créer).
 const commandeResolution = (chemin: string) => ['readlink', '-m', '--', chemin];
@@ -181,6 +221,28 @@ export async function creerConteneurAgent(
   return c;
 }
 
+/** Conteneur d'analyse : mêmes protections que les agents, sans Claude Code ; la commande est son processus principal. */
+export async function creerConteneurAnalyse(
+  docker: Docker,
+  o: { tacheId: string; imageId: string; reseau: string; env: string[]; ressources: Ressources; cmd: string[]; montages: Docker.MountConfig },
+): Promise<Docker.Container> {
+  const c = await docker.createContainer({
+    Image: o.imageId, User: 'node', WorkingDir: RACINE_PROJET, Cmd: o.cmd, Env: o.env,
+    Labels: { [LABEL_TACHE]: o.tacheId },
+    HostConfig: {
+      ...DURCISSEMENT, NetworkMode: o.reseau, Memory: o.ressources.memoire, NanoCpus: Math.round(o.ressources.cpus * 1e9),
+      PidsLimit: o.ressources.pids, Tmpfs: { '/tmp': 'rw,nosuid,size=512m' }, Mounts: o.montages,
+    },
+  });
+  try {
+    await c.start();
+  } catch (e) {
+    await c.remove({ force: true }).catch(() => {});
+    throw e;
+  }
+  return c;
+}
+
 export async function executerDans(conteneur: Docker.Container, cmd: string[], surSortie: (m: Buffer) => void): Promise<{ code: number; erreurs: string }> {
   const exec = await conteneur.exec({ Cmd: cmd, AttachStdout: true, AttachStderr: true, User: 'node', WorkingDir: RACINE_PROJET });
   const flux = await exec.start({ hijack: true, stdin: false });
@@ -195,14 +257,15 @@ export async function executerDans(conteneur: Docker.Container, cmd: string[], s
   return { code: info?.ExitCode ?? -1, erreurs };
 }
 
-export async function lireFichierConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {
+/** Lecture du gardien dans le conteneur en cours : au-delà du plafond ordinaire, « trop gros ». */
+export async function lireFichierConteneur(conteneur: Docker.Container, chemin: string): Promise<LectureControlee> {
   if (!cheminConfine(chemin)) return null;
   const morceaux: Buffer[] = [];
   const r = await Promise.race([
-    executerDans(conteneur, commandeLecture(chemin), m => morceaux.push(m)),
+    executerDans(conteneur, commandeLecture(chemin, PLAFOND_LECTURE), m => morceaux.push(m)),
     new Promise<null>(fin => setTimeout(() => fin(null), 30_000).unref()),
   ]);
-  return r && r.code === 0 ? Buffer.concat(morceaux).toString('utf8') : null;
+  return r ? contenuLu(r.code, Buffer.concat(morceaux), PLAFOND_LECTURE) : null;
 }
 
 export async function resoudreCheminConteneur(conteneur: Docker.Container, chemin: string): Promise<string | null> {
@@ -226,4 +289,39 @@ export function fichierParametresVides(dossierDonnees: string): string {
   fs.mkdirSync(path.dirname(fichier), { recursive: true });
   if (!fs.existsSync(fichier)) fs.writeFileSync(fichier, '{}');
   return fichier;
+}
+
+/** Volume jetable cloné depuis la branche : les agents en lecture seule y compilent et testent sans toucher à la branche. */
+export async function preparerCopieControle(docker: Docker, imageId: string, tacheId: string): Promise<string> {
+  const volume = nomCopie(tacheId);
+  // Un montage de type volume créerait un volume source vide s'il manquait : on vérifie avant.
+  await docker.getVolume(nomRessource(tacheId)).inspect().catch((e: unknown) => {
+    if (codeHttp(e) === 404) throw new Error(`copie de contrôle de ${tacheId} impossible : espace de la tâche absent`);
+    throw e;
+  });
+  await supprimerCopieControle(docker, tacheId);
+  await docker.createVolume({ Name: volume, Labels: { [LABEL_TACHE]: tacheId } });
+  const script = [
+    'export HOME=/tmp',
+    `git config --global --add safe.directory '*'`,
+    `git clone --quiet --no-hardlinks --branch '${brancheTache(tacheId)}' /source/projet ${RACINE_PROJET}`,
+    `cd ${RACINE_PROJET}`,
+    `git config user.name "Bureau d'agents"`,
+    'git config user.email bureau@localhost',
+    // Le cadreur écrit spec.md et plan.md dans la copie : jamais dans l'espace de la branche.
+    `mkdir -p ${DOSSIER_ETAT} ${DOSSIER_CADRAGE}`,
+  ].join(' && ');
+  const r = await executerJetable(docker, imageId, ['sh', '-c', script], [
+    { Type: 'volume', Source: volume, Target: '/workspace' },
+    { Type: 'volume', Source: nomRessource(tacheId), Target: '/source', ReadOnly: true },
+  ]);
+  if (r.code !== 0) {
+    await supprimerCopieControle(docker, tacheId);
+    throw new Error(`copie de contrôle de ${tacheId} impossible : ${r.stderr.toString('utf8').slice(-500)}`);
+  }
+  return volume;
+}
+
+export async function supprimerCopieControle(docker: Docker, tacheId: string): Promise<void> {
+  await docker.getVolume(nomCopie(tacheId)).remove({ force: true }).catch((e: unknown) => { if (codeHttp(e) !== 404) throw e; });
 }

@@ -3,13 +3,13 @@ import { transition, type Etape, type EtatTache, type Evenement, type Statut } f
 
 export type Reprise = { sessionId: string; mode: 'defer' | 'message'; message: string | null; empreinteTranscript: string };
 export type Tache = EtatTache & {
-  id: string; projet: string; titre: string; cheminProjet: string; budgetUsd: number; depenseUsd: number; reprise: Reprise | null;
+  id: string; projet: string; titre: string; cheminProjet: string; budgetUsd: number; depenseUsd: number; reprise: Reprise | null; agent: string | null; commitBase: string | null;
 };
 export type NouvelleTache = Pick<Tache, 'id' | 'projet' | 'titre' | 'cheminProjet' | 'budgetUsd'>;
 
 type Ligne = {
   id: string; projet: string; titre: string; chemin_projet: string; etape: Etape; statut: Statut; raison: string | null;
-  echanges_plan: number; essais_qa: number; budget_usd: number; depense_usd: number; reprise: string | null;
+  echanges_plan: number; essais_qa: number; budget_usd: number; depense_usd: number; reprise: string | null; agent: string | null; commit_base: string | null;
 };
 
 const maintenant = () => new Date().toISOString();
@@ -17,7 +17,7 @@ const maintenant = () => new Date().toISOString();
 const versTache = (l: Ligne): Tache => ({
   id: l.id, projet: l.projet, titre: l.titre, cheminProjet: l.chemin_projet, etape: l.etape, statut: l.statut, raison: l.raison,
   echangesPlan: l.echanges_plan, essaisQa: l.essais_qa, budgetUsd: l.budget_usd, depenseUsd: l.depense_usd,
-  reprise: l.reprise ? (JSON.parse(l.reprise) as Reprise) : null,
+  reprise: l.reprise ? (JSON.parse(l.reprise) as Reprise) : null, agent: l.agent, commitBase: l.commit_base,
 });
 
 export function creerTache(db: Base, t: NouvelleTache): Tache {
@@ -45,6 +45,15 @@ export function appliquer(db: Base, id: string, ev: Evenement): Tache {
 
 export function definirReprise(db: Base, id: string, reprise: Reprise | null): void {
   db.prepare('UPDATE taches SET reprise = ?, maj_le = ? WHERE id = ?').run(reprise ? JSON.stringify(reprise) : null, maintenant(), id);
+}
+
+export function definirAgent(db: Base, id: string, agent: string | null): void {
+  db.prepare('UPDATE taches SET agent = ?, maj_le = ? WHERE id = ?').run(agent, maintenant(), id);
+}
+
+export function definirCommitBase(db: Base, id: string, sha: string): void {
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`commit de base invalide pour ${id}`);
+  db.prepare('UPDATE taches SET commit_base = ?, maj_le = ? WHERE id = ?').run(sha, maintenant(), id);
 }
 
 export function ajouterDepense(db: Base, id: string, usd: number): Tache {
