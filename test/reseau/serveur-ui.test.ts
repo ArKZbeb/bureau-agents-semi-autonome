@@ -144,6 +144,11 @@ test('projets : liste, détection, liaison', async () => {
   for (const corps of [{ ...ok, chemin: 'relatif' }, { ...ok, budgetUsd: '6' }, { ...ok, couvertureLignes: 80.5 }, { ...ok, nom: '' }])
     assert.equal((await m.appeler('/api/projets', { methode: 'POST', corps })).statut, 400);
   assert.equal((await m.appeler('/api/projets', { methode: 'POST', corps: { ...ok, nom: 'Doublon' } })).statut, 409);
+  for (const corps of [{ ...ok, budgetUsd: 0 }, { ...ok, couvertureLignes: 101 }, { ...ok, couvertureLignes: -1 }])
+    assert.equal((await m.appeler('/api/projets', { methode: 'POST', corps })).statut, 400);
+  const infini = await m.appeler('/api/projets', { methode: 'POST', brut: '{"nom":"Planning","chemin":"/depots/planning","couvertureLignes":80,"budgetUsd":1e999}' });
+  assert.equal(infini.statut, 400, 'budget non fini (1e999 = Infinity en JSON) refusé');
+  assert.deepEqual(m.relies, [ok], 'aucun refus n’a atteint la liaison');
   m.fermer();
 });
 
@@ -158,5 +163,11 @@ test('les nouvelles routes exigent le jeton', async () => {
   const m = await monter();
   for (const chemin of ['/api/etat', '/api/projets', '/api/journal/integrite'])
     assert.equal((await m.appeler(chemin, { entetes: { authorization: 'Bearer faux' } })).statut, 401);
+  const corps = { nom: 'Planning', chemin: '/depots/planning', budgetUsd: 6, couvertureLignes: 80 };
+  for (const chemin of ['/api/projets', '/api/projets/detection']) {
+    assert.equal((await m.appeler(chemin, { methode: 'POST', corps, entetes: { authorization: 'Bearer faux' } })).statut, 401);
+    assert.equal((await m.appeler(chemin, { methode: 'POST', corps, entetes: { origin: 'https://evil.example' } })).statut, 403);
+  }
+  assert.deepEqual(m.relies, [], 'rien n’est lié sans jeton ni origine valides');
   m.fermer();
 });

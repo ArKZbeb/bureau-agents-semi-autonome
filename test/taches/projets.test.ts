@@ -90,3 +90,14 @@ test('un seuil invalide ne laisse aucun projet enregistré', () => {
   assert.throws(() => relierProjet(db, { nom: 'A', chemin: dossier(['App.csproj']), budgetUsd: 6, couvertureLignes: 12.5 }));
   assert.equal(lireProjet(db, 'A', 80), null);
 });
+
+test('relier : « . », « .. » et lien symbolique vers un dossier déjà relié = déjà relié ; chemin canonique stocké', () => {
+  const db = base();
+  const chemin = dossier(['App.csproj']);
+  const lien = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lien-')), 'vers-projet');
+  fs.symlinkSync(chemin, lien);
+  const p = relierProjet(db, { nom: 'A', chemin: `${chemin}/.`, budgetUsd: 6, couvertureLignes: 80 });
+  assert.equal(p.chemin, fs.realpathSync(chemin));
+  for (const autre of [chemin, `${chemin}/../${path.basename(chemin)}`, lien])
+    assert.throws(() => relierProjet(db, { nom: 'B', chemin: autre, budgetUsd: 6, couvertureLignes: 80 }), /déjà relié/);
+});

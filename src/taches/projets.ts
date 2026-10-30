@@ -53,6 +53,11 @@ const versProjet = (db: Base, l: Ligne, defaut: number): Projet =>
 export function relierProjet(db: Base, p: { nom: string; chemin: string; budgetUsd: number; couvertureLignes: number }): Projet {
   if (!NOM.test(p.nom)) throw new Error('nom de projet invalide (lettres, chiffres, espace, . _ -, 60 caractères au plus)');
   if (!Number.isFinite(p.budgetUsd) || p.budgetUsd <= 0) throw new Error('budget par tâche attendu : nombre positif');
+  if (!path.isAbsolute(p.chemin)) throw new Error('chemin absolu attendu');
+  // Chemin canonique (« .. », « . » et liens symboliques résolus) : un même dépôt n'est relié qu'une fois.
+  let canonique: string;
+  try { canonique = fs.realpathSync(path.resolve(p.chemin)); } catch { throw new Error(`dossier introuvable : ${p.chemin}`); }
+  p = { ...p, chemin: canonique };
   const d = detecterProjet(p.chemin);
   if (!d.git) throw new Error(`${p.chemin} n’est pas un dépôt Git`);
   if (!d.dotnet && !d.angular) throw new Error(`${p.chemin} : aucune stack .NET ou Angular détectée`);
