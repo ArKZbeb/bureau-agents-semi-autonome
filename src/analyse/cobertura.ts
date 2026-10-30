@@ -48,13 +48,19 @@ export function couvertureLignesModifiees(modifiees: Map<string, Set<number>>, c
   return { couvertes, total, pourcentage: total ? Math.round((couvertes / total) * 100) : null };
 }
 
+const sourcesModifiees = (modifiees: Map<string, Set<number>>) => [...modifiees.keys()].filter(c => /\.(cs|ts)$/.test(c) && !estFichierDeTest(c));
+
+/** Fichiers source (.cs, .ts) modifiés hors tests absents de toute Cobertura : aucun test ne les charge (no-go, voir reglesQa). */
+export const sourcesHorsCouverture = (modifiees: Map<string, Set<number>>, couvertures: Map<string, Map<number, number>>[]): string[] =>
+  sourcesModifiees(modifiees).filter(c => !couvertures.some(cob => cob.has(c)));
+
 /**
  * Lignes modifiées non instrumentées ignorées (choix 3) : ce qui échappe ainsi à la mesure est au moins signalé.
- * Fichiers source (.cs, .ts) modifiés hors tests absents de toute Cobertura ; aucune ligne modifiée mesurable.
+ * Fichiers source modifiés absents de toute Cobertura ; aucune ligne modifiée mesurable.
  */
 export function signalementsCouverture(modifiees: Map<string, Set<number>>, couvertures: Map<string, Map<number, number>>[], couverture: Couverture): string[] {
-  const sources = [...modifiees.keys()].filter(c => /\.(cs|ts)$/.test(c) && !estFichierDeTest(c));
-  const absents = sources.filter(c => !couvertures.some(cob => cob.has(c)));
+  const sources = sourcesModifiees(modifiees);
+  const absents = sourcesHorsCouverture(modifiees, couvertures);
   const s: string[] = [];
   if (absents.length) s.push(`${absents.length} fichier(s) source modifié(s) absent(s) de la couverture`);
   if (sources.length && couverture.total === 0) s.push('couverture non mesurable sur les lignes modifiées');

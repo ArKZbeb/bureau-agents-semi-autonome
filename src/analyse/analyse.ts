@@ -1,4 +1,4 @@
-import { couvertureLignesModifiees, lireCobertura, signalementsCouverture, type Couverture } from './cobertura.ts';
+import { couvertureLignesModifiees, lireCobertura, signalementsCouverture, sourcesHorsCouverture, type Couverture } from './cobertura.ts';
 import { lignesModifiees } from './diff.ts';
 import { lireDotnetVulnerables, lireGitleaks, lireNpmAudit, lireSemgrep, lireTrx, type Constat } from './rapports.ts';
 import { signesDeTriche } from './triche.ts';
@@ -6,9 +6,11 @@ import { signesDeTriche } from './triche.ts';
 export const OUTILS = ['tests_dotnet', 'audit_dotnet', 'tests_angular', 'audit_npm', 'semgrep', 'gitleaks'] as const;
 export type NomOutil = (typeof OUTILS)[number];
 export type StatutOutil = 'ok' | 'echec' | 'absent' | 'non_applicable';
+/** Sources hors couverture : fichiers source modifiés (hors tests) absents de toute Cobertura alors qu'une stack a été testée. */
+export type CouvertureAnalyse = Couverture & { sourcesHorsCouverture: string[] };
 export type Analyse = {
   sha: string; base: string; outils: Record<NomOutil | 'couverture', StatutOutil>;
-  tests: { total: number; echecs: number } | null; couverture: Couverture | null; constats: Constat[]; signalements: string[];
+  tests: { total: number; echecs: number } | null; couverture: CouvertureAnalyse | null; constats: Constat[]; signalements: string[];
 };
 
 export const LIBELLES_OUTILS: Record<NomOutil | 'couverture', string> = {
@@ -85,7 +87,9 @@ export function assemblerAnalyse(base: string, fichiers: Record<string, string |
   }
 
   const modifiees = lignesModifiees(patch ?? '');
-  const couverture = statutCouverture === 'ok' ? couvertureLignesModifiees(modifiees, couvertures) : null;
+  const couverture = statutCouverture === 'ok'
+    ? { ...couvertureLignesModifiees(modifiees, couvertures), sourcesHorsCouverture: sourcesHorsCouverture(modifiees, couvertures) }
+    : null;
   return {
     sha: (lu('sha') ?? '').trim(),
     base,

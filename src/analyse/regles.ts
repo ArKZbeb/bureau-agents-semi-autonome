@@ -18,6 +18,11 @@ export function reglesQa(a: Analyse | null, seuils: Seuils, sortieQa: z.infer<ty
     // Pourcentage null = non mesurable ou non applicable : pas de règle de seuil. Zéro reste une mesure.
     const p = a.couverture?.pourcentage;
     if (p !== null && p !== undefined && p < seuils.couvertureLignes) d.push(`couverture des lignes modifiées ${p} % < ${seuils.couvertureLignes} %`);
+    // Un fichier source modifié qu'aucun test ne charge échappe au pourcentage (choix 3) : no-go, liste illisible comprise.
+    const hors: unknown = a.couverture?.sourcesHorsCouverture;
+    if (a.couverture && (!Array.isArray(hors) || !hors.every(f => typeof f === 'string'))) d.push('couverture : fichiers source hors couverture inconnus');
+    else if (Array.isArray(hors) && hors.length)
+      d.push(`couverture : ${hors.length} fichier(s) source modifié(s) hors couverture (${hors.slice(0, 5).join(', ')}${hors.length > 5 ? ', …' : ''})`);
   }
   if (sortieQa.verdict !== 'go') d.push('verdict du QA : no-go');
   const remplis = new Set(sortieQa.criteres.filter(c => c.rempli).map(c => c.numero));

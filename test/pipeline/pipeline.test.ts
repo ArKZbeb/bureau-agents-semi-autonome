@@ -23,7 +23,7 @@ const BASE = 'b'.repeat(40);
 const ANALYSE_VERTE: Analyse = {
   sha: SHA, base: BASE,
   outils: { tests_dotnet: 'ok', audit_dotnet: 'ok', tests_angular: 'non_applicable', audit_npm: 'non_applicable', semgrep: 'ok', gitleaks: 'ok', couverture: 'ok' },
-  tests: { total: 12, echecs: 0 }, couverture: { couvertes: 9, total: 10, pourcentage: 90 }, constats: [], signalements: [],
+  tests: { total: 12, echecs: 0 }, couverture: { couvertes: 9, total: 10, pourcentage: 90, sourcesHorsCouverture: [] }, constats: [], signalements: [],
 };
 
 const SPEC = "# Spec\n\n## Critères d’acceptation\n\n1. Le PDF contient le synopsis\n";
@@ -265,7 +265,7 @@ function aEtape(db: ReturnType<typeof ouvrirBase>, etape: 'review' | 'qa', analy
   db.prepare("UPDATE taches SET etape = ? WHERE id = 'T-41'").run(etape);
 }
 const qaGo = { verdict: 'go', criteres: [{ numero: 1, rempli: true, preuve: 'ExportPdf_ContientSynopsis vert' }] };
-const COUV_BASSE: Analyse = { ...ANALYSE_VERTE, couverture: { couvertes: 18, total: 25, pourcentage: 72 } };
+const COUV_BASSE: Analyse = { ...ANALYSE_VERTE, couverture: { couvertes: 18, total: 25, pourcentage: 72, sourcesHorsCouverture: [] } };
 
 test('review : analyse lancée sur la copie, signée, transmise au reviewer', async () => {
   const { db, deps, appels, analyses } = banc([{ rapport: 'RAS' }]);
