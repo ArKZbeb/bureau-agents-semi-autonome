@@ -1,4 +1,4 @@
-import { couvertureLignesModifiees, lireCobertura, type Couverture } from './cobertura.ts';
+import { couvertureLignesModifiees, lireCobertura, signalementsCouverture, type Couverture } from './cobertura.ts';
 import { lignesModifiees } from './diff.ts';
 import { lireDotnetVulnerables, lireGitleaks, lireNpmAudit, lireSemgrep, lireTrx, type Constat } from './rapports.ts';
 import { signesDeTriche } from './triche.ts';
@@ -75,13 +75,15 @@ export function assemblerAnalyse(base: string, fichiers: Record<string, string |
     if (rapport && outils[o] === 'ok') constats.push(...(rapport[1](lu(rapport[0]) ?? '') ?? []));
   }
 
+  const modifiees = lignesModifiees(patch ?? '');
+  const couverture = statutCouverture === 'ok' ? couvertureLignesModifiees(modifiees, couvertures) : null;
   return {
     sha: (lu('sha') ?? '').trim(),
     base,
     outils: { ...outils, couverture: statutCouverture },
     tests: trx,
-    couverture: statutCouverture === 'ok' ? couvertureLignesModifiees(lignesModifiees(patch ?? ''), couvertures) : null,
+    couverture,
     constats,
-    signalements: signesDeTriche(patch ?? ''),
+    signalements: [...signesDeTriche(patch ?? ''), ...(couverture ? signalementsCouverture(modifiees, couvertures, couverture) : [])],
   };
 }

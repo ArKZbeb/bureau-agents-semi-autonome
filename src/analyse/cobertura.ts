@@ -30,7 +30,7 @@ export function lireCobertura(xml: string): Map<string, Map<number, number>> {
 }
 
 // dotnet-coverage instrumente aussi les assemblies de test : leurs lignes gonfleraient le pourcentage.
-const estFichierDeTest = (chemin: string): boolean =>
+export const estFichierDeTest = (chemin: string): boolean =>
   /(^|\/)(tests?|__tests__|[^/]*\.Tests?)\//i.test(chemin) || /(Tests?\.cs|\.(spec|test)\.[cm]?[jt]sx?)$/.test(chemin);
 
 export function couvertureLignesModifiees(modifiees: Map<string, Set<number>>, couvertures: Map<string, Map<number, number>>[]): Couverture {
@@ -46,4 +46,17 @@ export function couvertureLignesModifiees(modifiees: Map<string, Set<number>>, c
     }
   }
   return { couvertes, total, pourcentage: total ? Math.round((couvertes / total) * 100) : null };
+}
+
+/**
+ * Lignes modifiées non instrumentées ignorées (choix 3) : ce qui échappe ainsi à la mesure est au moins signalé.
+ * Fichiers source (.cs, .ts) modifiés hors tests absents de toute Cobertura ; aucune ligne modifiée mesurable.
+ */
+export function signalementsCouverture(modifiees: Map<string, Set<number>>, couvertures: Map<string, Map<number, number>>[], couverture: Couverture): string[] {
+  const sources = [...modifiees.keys()].filter(c => /\.(cs|ts)$/.test(c) && !estFichierDeTest(c));
+  const absents = sources.filter(c => !couvertures.some(cob => cob.has(c)));
+  const s: string[] = [];
+  if (absents.length) s.push(`${absents.length} fichier(s) source modifié(s) absent(s) de la couverture`);
+  if (sources.length && couverture.total === 0) s.push('couverture non mesurable sur les lignes modifiées');
+  return s;
 }

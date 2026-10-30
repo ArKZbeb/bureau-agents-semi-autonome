@@ -131,3 +131,39 @@ test('sha invalide ou absent : mesures statiques et couverture forcées à absen
     assert.equal(a.outils.tests_dotnet, 'echec');
   }
 });
+
+const ajout = (fichier: string, lignes = 1) =>
+  `diff --git a/${fichier} b/${fichier}\n--- a/${fichier}\n+++ b/${fichier}\n@@ -0,0 +1,${lignes} @@\n${'+x\n'.repeat(lignes)}`;
+
+test('fichiers source modifiés absents de toute Cobertura : signalés (tests, autres extensions et fichiers couverts exclus)', () => {
+  const f = dotnetSeul();
+  f['diff.patch'] = DIFF + ajout('src/Autre.cs') + ajout('web/src/app/carte.ts') + ajout('tests/FilmTests.cs') + ajout('README.md');
+  const a = assemblerAnalyse(BASE, f);
+  assert.deepEqual(a.couverture, { couvertes: 1, total: 2, pourcentage: 50 }, 'choix 3 inchangé : lignes non instrumentées ignorées');
+  assert.deepEqual(a.signalements, ['2 fichier(s) source modifié(s) absent(s) de la couverture']);
+});
+
+test('aucune ligne modifiée instrumentée alors que des sources sont modifiées : couverture non mesurable signalée', () => {
+  const absent = dotnetSeul();
+  absent['diff.patch'] = ajout('src/Autre.cs', 3);
+  assert.deepEqual(assemblerAnalyse(BASE, absent).signalements, [
+    '1 fichier(s) source modifié(s) absent(s) de la couverture', 'couverture non mesurable sur les lignes modifiées',
+  ]);
+  // Fichier présent dans la Cobertura, mais ses lignes modifiées ne sont pas instrumentées (commentaires...).
+  const commentaires = dotnetSeul();
+  commentaires['diff.patch'] = 'diff --git a/src/Film.cs b/src/Film.cs\n--- a/src/Film.cs\n+++ b/src/Film.cs\n@@ -8 +8,2 @@\n+// a\n+// b\n';
+  const a = assemblerAnalyse(BASE, commentaires);
+  assert.deepEqual(a.couverture, { couvertes: 0, total: 0, pourcentage: null });
+  assert.deepEqual(a.signalements, ['couverture non mesurable sur les lignes modifiées']);
+});
+
+test('sans source modifiée ou sans stack testée : aucun signalement de couverture', () => {
+  const doc = dotnetSeul();
+  doc['diff.patch'] = ajout('README.md') + ajout('tests/FilmTests.cs');
+  assert.deepEqual(assemblerAnalyse(BASE, doc).signalements, []);
+  const rien: Record<string, string | null> = {
+    sha: SHA, 'diff.patch': ajout('src/Autre.cs'), 'tests_dotnet.na': '', 'audit_dotnet.na': '', 'tests_angular.na': '', 'audit_npm.na': '',
+    'semgrep.code': '0', 'semgrep.json': '{"results":[]}', 'gitleaks.code': '0', 'gitleaks.json': '[]',
+  };
+  assert.deepEqual(assemblerAnalyse(BASE, rien).signalements, []);
+});
