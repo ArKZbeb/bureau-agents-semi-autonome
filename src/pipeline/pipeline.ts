@@ -8,7 +8,7 @@ import type { Base } from '../db.ts';
 import { AnomalieIntegrite } from '../integrite/anomalie.ts';
 import { enregistrerArtefact, lireArtefact } from '../integrite/artefacts.ts';
 import { ajouterAuJournal, lireJournal } from '../integrite/journal.ts';
-import { ajouterDepense, appliquer, definirAgent, lireTache, type Tache } from '../taches/depot.ts';
+import { ajouterDepense, appliquer, definirAgent, definirReprise, lireTache, type Tache } from '../taches/depot.ts';
 import { ajouterEchange, enregistrerProposition } from '../taches/echanges.ts';
 import type { Controle, DemandeControle } from './controleur.ts';
 import { documentsEtape, extraireCriteres, lireCriteres, promptEtape } from './prompts.ts';
@@ -39,6 +39,8 @@ export function verdictQa(sortie: z.infer<typeof SortieQa>, criteres: string[]):
 }
 
 function signaler(deps: DepsPipeline, tacheId: string, raison: 'integrite' | 'erreur_api', detail: string): Tache {
+  // Après une anomalie, aucune session n'est reprise telle quelle : la reprise humaine relance l'étape à neuf.
+  if (raison === 'integrite') definirReprise(deps.db, tacheId, null);
   const t = appliquer(deps.db, tacheId, { type: 'pause', raison, detail });
   ajouterAuJournal(deps.db, deps.cle, {
     tacheId, type: 'evenement', commande: 'contrôle du relais', couche: '—', decision: 'Refusé',
@@ -147,7 +149,7 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
         // Relecture vérifiée après l'agent : une altération pendant l'étape lève AnomalieIntegrite (pause, via le catch).
         criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
         enregistrerArtefact(db, cle, tacheId, 'verdict', JSON.stringify(s, null, 2));
-            t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: verdictQa(s, criteresQa) });
+        t = appliquer(db, tacheId, { type: 'etape_terminee', verdict: verdictQa(s, criteresQa) });
         break;
       }
     }

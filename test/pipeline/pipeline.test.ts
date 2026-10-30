@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { chargerConfig } from '../../src/config.ts';
 import type { Agent, ResultatEtape } from '../../src/conteneurs/execution.ts';
 import { ouvrirBase } from '../../src/db.ts';
+import { AnomalieIntegrite } from '../../src/integrite/anomalie.ts';
 import { enregistrerArtefact, lireArtefact } from '../../src/integrite/artefacts.ts';
 import { lireJournal } from '../../src/integrite/journal.ts';
 import type { Controle, DemandeControle } from '../../src/pipeline/controleur.ts';
 import { avancer, verdictQa, type DepsPipeline } from '../../src/pipeline/pipeline.ts';
 import { numeroterCriteres } from '../../src/pipeline/prompts.ts';
-import { appliquer, creerTache, lireTache } from '../../src/taches/depot.ts';
+import { appliquer, creerTache, definirReprise, lireTache } from '../../src/taches/depot.ts';
 import { RAISON_PROPOSITION, RAISON_QUESTIONS } from '../../src/taches/etats.ts';
 import { listerEchanges, lireProposition } from '../../src/taches/echanges.ts';
 
@@ -212,4 +213,40 @@ test('document signé manquant : pause d’intégrité, aucun agent lancé', asy
   assert.equal(appels.length, 0);
   assert.equal(controles.length, 0);
   assert.equal(lireJournal(db, 'T-41').at(-1)?.decideur, 'Contrôleur d’intégrité');
+});
+
+const REPRISE = { sessionId: 'session-1', mode: 'defer' as const, message: null, empreinteTranscript: 'e' };
+
+test('reprise d’une étape (reprise !== null) : contrôleur non appelé, copie existante réutilisée', async () => {
+  const { db, deps, appels, controles, copies } = banc([{ verdict: 'ok', note: 'Plan sûr.' }]);
+  valider(db);
+  definirReprise(db, 'T-41', REPRISE);
+  const t = await avancer(deps, 'T-41');
+  assert.equal(controles.length, 0, 'pas de contrôle du relais à la reprise');
+  assert.deepEqual(copies, ['reprise:T-41', 'supprimee:T-41'], 'copie(…, neuve = false)');
+  assert.deepEqual([appels.length, appels[0].volume], [1, 'bureau-t-41-controle']);
+  assert.deepEqual([t.etape, t.statut], ['implementation', 'prete']);
+});
+
+test('pause d’intégrité : la reprise de session est effacée (jamais de --resume après une anomalie)', async () => {
+  const { db, deps, appels } = banc([]);
+  valider(db);
+  definirReprise(db, 'T-41', REPRISE);
+  db.prepare("UPDATE artefacts SET contenu = '# Plan sans zones' WHERE type = 'plan'").run();
+  const t = await avancer(deps, 'T-41');
+  assert.equal(t.raison?.split(' : ')[0], 'integrite');
+  assert.equal(t.reprise, null);
+  assert.equal(appels.length, 0);
+});
+
+test('pause d’intégrité pendant l’étape : la reprise de session est effacée aussi', async () => {
+  const { db, deps } = banc([]);
+  valider(db);
+  deps.executer = async id => {
+    appliquer(db, id, { type: 'demarrage' });
+    definirReprise(db, id, REPRISE); // comme lancerEtape lors d'un defer
+    throw new AnomalieIntegrite('plan', 'plan altéré pendant l’étape');
+  };
+  const t = await avancer(deps, 'T-41');
+  assert.deepEqual([t.statut, t.raison, t.reprise], ['en_pause', 'integrite : plan altéré pendant l’étape', null]);
 });
