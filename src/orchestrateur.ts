@@ -32,6 +32,7 @@ import { adressesConteneurs } from './reseau/adresses.ts';
 import { Jetons } from './reseau/jetons.ts';
 import { relayerApi } from './reseau/proxy-api.ts';
 import { creerServeurConteneurs } from './reseau/serveur-conteneurs.ts';
+import { chargerPanneau } from './reseau/panneau.ts';
 import { creerServeurUi } from './reseau/serveur-ui.ts';
 import { appliquer, creerTache, definirCommitBase, listerTaches, lireTache, reprendreApresRedemarrage, type NouvelleTache, type Tache } from './taches/depot.ts';
 import { detecterProjet, lireProjet, listerProjets, relierProjet } from './taches/projets.ts';
@@ -42,7 +43,7 @@ export type OptionsOrchestrateur = {
   surOutil?: DepsExecution['surOutil'];
 };
 export type Orchestrateur = {
-  db: Base; jetonSession: string; urlUi: string;
+  db: Base; jetonSession: string; urlUi: string; urlPanneau: string;
   execution: DepsExecution;
   creerTache: (t: Omit<NouvelleTache, 'id'> & { id?: string; demande: string }) => Promise<Tache>;
   validerArtefact: (tacheId: string, type: TypeArtefact, contenu: string) => Artefact;
@@ -217,7 +218,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
       if (nom === 'budget') return continuerBudget(db, cle, id, Number(c.montantUsd));
       return reprendre(db, cle, id);
     },
-  });
+  }, chargerPanneau(path.join(o.racineDepot, 'web', 'dist', 'web', 'browser')));
   // Le serveur des conteneurs écoute sur 127.0.0.1 et sur la passerelle du pont Docker (jamais 0.0.0.0) : sous Linux, host.docker.internal y mène.
   const passerelleBridge = await docker.getNetwork('bridge').inspect().then(
     (n: { IPAM?: { Config?: { Gateway?: string }[] } }) => n.IPAM?.Config?.[0]?.Gateway ?? null, () => null);
@@ -235,7 +236,7 @@ export async function demarrerOrchestrateur(o: OptionsOrchestrateur): Promise<Or
   }
   ordonnanceur.demarrer();
   return {
-    db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`, execution,
+    db, jetonSession, urlUi: `http://127.0.0.1:${config.portUi}`, urlPanneau: `http://127.0.0.1:${config.portUi}/#jeton=${jetonSession}`, execution,
     creerTache: creerTacheAvecDemande,
     validerArtefact: (tacheId, type, contenu) => enregistrerArtefact(db, cle, tacheId, type, contenu),
     lancerEtape: (tacheId, agent, prompt) => lancerEtape(execution, tacheId, agent, prompt),

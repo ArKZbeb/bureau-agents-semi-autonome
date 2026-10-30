@@ -3,6 +3,7 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { sha256 } from '../integrite/signature.ts';
 import { lireCorps, repondreJson } from './http.ts';
+import { ENTETES_PANNEAU, type FichierPanneau } from './panneau.ts';
 
 export type RoutesUi = {
   taches: () => unknown;
@@ -45,24 +46,39 @@ const texte = (v: unknown) => typeof v === 'string' && v.trim() !== '';
 
 const egal = (a: string, b: string) => timingSafeEqual(Buffer.from(sha256(a), 'hex'), Buffer.from(sha256(b), 'hex'));
 
-export function creerServeurUi(jetonSession: string, routes: RoutesUi): http.Server {
+function servirPanneau(panneau: Map<string, FichierPanneau> | null, req: http.IncomingMessage, res: http.ServerResponse, chemin: string): void {
+  if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { allow: 'GET', ...ENTETES_PANNEAU }); res.end(); return; }
+  if (!panneau) {
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8', ...ENTETES_PANNEAU });
+    res.end('Panneau non construit : lancer npm run web:build, puis redémarrer le bureau.');
+    return;
+  }
+  // Une route du front (sans extension) reçoit index.html ; un fichier absent de la carte n'existe pas.
+  const f = panneau.get(chemin) ?? (path.posix.extname(chemin) === '' ? panneau.get('/index.html') : undefined);
+  if (!f) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...ENTETES_PANNEAU }); res.end('introuvable'); return; }
+  res.writeHead(200, { 'content-type': f.type, ...ENTETES_PANNEAU });
+  res.end(req.method === 'HEAD' ? undefined : f.contenu);
+}
+
+export function creerServeurUi(jetonSession: string, routes: RoutesUi, panneau: Map<string, FichierPanneau> | null = null): http.Server {
   return http.createServer((req, res) => {
-    traiter(jetonSession, routes, req, res).catch(e => {
+    traiter(jetonSession, routes, panneau, req, res).catch(e => {
       if (res.headersSent) res.end();
       else repondreJson(res, 500, { erreur: (e as Error).message });
     });
   });
 }
 
-async function traiter(jeton: string, routes: RoutesUi, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function traiter(jeton: string, routes: RoutesUi, panneau: Map<string, FichierPanneau> | null, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const port = req.socket.localPort;
   const hotes = [`127.0.0.1:${port}`, `localhost:${port}`];
   if (!hotes.includes(req.headers.host ?? '')) return repondreJson(res, 403, { erreur: 'hôte refusé' });
+  const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
+  if (!url.pathname.startsWith('/api/')) return servirPanneau(panneau, req, res, url.pathname);
   const origine = req.headers.origin;
   if (origine !== undefined && !hotes.some(h => origine === `http://${h}`)) return repondreJson(res, 403, { erreur: 'origine refusée' });
   if (!egal(req.headers.authorization ?? '', `Bearer ${jeton}`)) return repondreJson(res, 401, { erreur: 'jeton de session requis' });
 
-  const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
   if (req.method === 'GET' && url.pathname === '/api/taches') return repondreJson(res, 200, routes.taches());
   if (req.method === 'GET' && url.pathname === '/api/journal/integrite') return repondreJson(res, 200, routes.integriteJournal());
   if (req.method === 'GET' && url.pathname === '/api/etat') return repondreJson(res, 200, routes.etat());

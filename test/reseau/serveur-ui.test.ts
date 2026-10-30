@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import type net from 'node:net';
 import { creerServeurUi } from '../../src/reseau/serveur-ui.ts';
+import type { FichierPanneau } from '../../src/reseau/panneau.ts';
 
 const JETON = 'jeton-de-session';
 
-async function monter() {
+async function monter(panneau: Map<string, FichierPanneau> | null = null) {
   const decisions: unknown[] = [];
   let arrets = 0;
   let reprises = 0;
@@ -28,16 +29,20 @@ async function monter() {
     tache: id => (id === 'T-41' ? { id } : null),
     creerTache: async t => { if (t.projet === 'Inconnu') throw new Error('projet non relié : Inconnu'); creations.push(t); return { id: 'T-42', ...t }; },
     action: (id, nom, corps) => { if (nom === 'reprise' && id === 'T-99') throw new Error('T-99 ne se reprend pas ainsi'); actions.push([id, nom, corps]); return { ok: true }; },
-  });
+  }, panneau);
   await new Promise<void>(r => serveur.listen(0, '127.0.0.1', r));
   const adresse = serveur.address() as net.AddressInfo;
   const appeler = (chemin: string, o: { methode?: string; entetes?: Record<string, string>; corps?: unknown; brut?: string } = {}) =>
-    new Promise<{ statut: number; corps: unknown }>((ok, ko) => {
+    new Promise<{ statut: number; corps: unknown; entetes: http.IncomingHttpHeaders; brut: string }>((ok, ko) => {
       const req = http.request({ host: '127.0.0.1', port: adresse.port, path: chemin, method: o.methode ?? 'GET',
         headers: { host: `127.0.0.1:${adresse.port}`, authorization: `Bearer ${JETON}`, ...o.entetes } }, res => {
         let t = '';
         res.on('data', d => (t += d));
-        res.on('end', () => ok({ statut: res.statusCode ?? 0, corps: t ? JSON.parse(t) : null }));
+        res.on('end', () => {
+          const r = { statut: res.statusCode ?? 0, corps: t && String(res.headers['content-type']).startsWith('application/json') ? JSON.parse(t) : null };
+          // Non énumérables : les assertions existantes comparent { statut, corps } en entier.
+          ok(Object.defineProperties(r, { entetes: { value: res.headers }, brut: { value: t } }) as typeof r & { entetes: http.IncomingHttpHeaders; brut: string });
+        });
       });
       req.on('error', ko);
       req.end(o.brut ?? (o.corps === undefined ? undefined : JSON.stringify(o.corps)));
@@ -169,5 +174,52 @@ test('les nouvelles routes exigent le jeton', async () => {
     assert.equal((await m.appeler(chemin, { methode: 'POST', corps, entetes: { origin: 'https://evil.example' } })).statut, 403);
   }
   assert.deepEqual(m.relies, [], 'rien n’est lié sans jeton ni origine valides');
+  m.fermer();
+});
+
+const PANNEAU = new Map([
+  ['/index.html', { contenu: Buffer.from('<html>panneau</html>'), type: 'text/html; charset=utf-8' }],
+  ['/main-AB12.js', { contenu: Buffer.from('console.log(1)'), type: 'text/javascript; charset=utf-8' }],
+]);
+
+test('sert le panneau sans jeton, avec CSP stricte', async () => {
+  const m = await monter(PANNEAU);
+  const r = await m.appeler('/', { entetes: { authorization: '' } });
+  assert.equal(r.statut, 200);
+  assert.equal(r.brut, '<html>panneau</html>');
+  assert.match(r.entetes['content-security-policy'] as string, /default-src 'self'.*frame-ancestors 'none'/);
+  assert.equal(r.entetes['x-content-type-options'], 'nosniff');
+  assert.equal(r.entetes['x-frame-options'], 'DENY');
+  assert.equal(r.entetes['referrer-policy'], 'no-referrer');
+  assert.equal((await m.appeler('/main-AB12.js', { entetes: { authorization: '' } })).brut, 'console.log(1)');
+  m.fermer();
+});
+
+test('routes du front renvoient index.html ; fichier inconnu = 404', async () => {
+  const m = await monter(PANNEAU);
+  assert.equal((await m.appeler('/taches/T-41', { entetes: { authorization: '' } })).brut, '<html>panneau</html>');
+  assert.equal((await m.appeler('/absent.js', { entetes: { authorization: '' } })).statut, 404);
+  assert.equal((await m.appeler('/../src/index.ts', { entetes: { authorization: '' } })).statut, 404);
+  m.fermer();
+});
+
+test('panneau : Host étranger refusé, méthode autre que GET refusée', async () => {
+  const m = await monter(PANNEAU);
+  assert.equal((await m.appeler('/', { entetes: { host: `bureau.evil.example:${m.adresse.port}` } })).statut, 403);
+  assert.equal((await m.appeler('/', { methode: 'POST', entetes: { authorization: '' } })).statut, 405);
+  m.fermer();
+});
+
+test('panneau non construit : message explicite', async () => {
+  const m = await monter(null);
+  const r = await m.appeler('/', { entetes: { authorization: '' } });
+  assert.equal(r.statut, 503);
+  assert.match(r.brut, /npm run web:build/);
+  m.fermer();
+});
+
+test('l’API exige toujours le jeton quand le panneau est servi', async () => {
+  const m = await monter(PANNEAU);
+  assert.equal((await m.appeler('/api/taches', { entetes: { authorization: '' } })).statut, 401);
   m.fermer();
 });
