@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import Docker from 'dockerode';
 import { construireImage } from '../src/conteneurs/image.ts';
 import {
-  arreterConteneurs, assurerPasserelle, creerConteneurAgent, executerDans, lireFichierConteneur, lireFichierVolume,
+  arreterConteneurs, assurerPasserelle, creerConteneurAgent, demultiplexer, executerDans, lireFichierConteneur, lireFichierVolume,
   resoudreCheminConteneur, resoudreCheminVolume,
   fichierParametresVides, nomCopie, nomRessource, preparerCopieControle, supprimerCopieControle, preparerEspace, preparerReseau, RACINE_PROJET, supprimerReseau, verifierImage,
 } from '../src/conteneurs/docker.ts';
@@ -134,4 +134,80 @@ test('copie de contrôle : tâche sans espace, rien n’est créé', async () =>
     await supprimerCopieControle(docker, id).catch(() => {});
     await docker.getVolume(nomRessource(id)).remove({ force: true }).catch(() => {});
   }
+});
+
+/** Conteneur jetable durci, sans réseau : renvoie stdout et stderr du script. */
+async function executerDansImage(imageId: string, script: string, tmpfs: Record<string, string> = {}): Promise<string> {
+  const c = await docker.createContainer({
+    Image: imageId, User: 'node', Cmd: ['bash', '-c', script],
+    HostConfig: { ReadonlyRootfs: true, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], NetworkMode: 'none', Tmpfs: { '/tmp': 'rw', ...tmpfs } },
+  });
+  try {
+    await c.start();
+    await c.wait();
+    const { stdout, stderr } = demultiplexer((await c.logs({ stdout: true, stderr: true, follow: false })) as unknown as Buffer);
+    return stdout.toString('utf8') + stderr.toString('utf8');
+  } finally {
+    await c.remove({ force: true }).catch(() => {});
+  }
+}
+
+test('image d’analyse : outils présents et script installé', async () => {
+  // HOME inscriptible : Semgrep y écrit ses réglages, la racine est en lecture seule.
+  const sortie = await executerDansImage(image, 'export HOME=/tmp && dotnet --list-sdks && semgrep --version && gitleaks version && chromium --version && test -x /opt/analyse/analyser.sh && test -f /opt/analyse/semgrep-regles.yml && echo OUTILS-OK');
+  assert.match(sortie, /OUTILS-OK/);
+});
+
+test('script d’analyse : base vérifiée, constats que le dépôt ne peut pas masquer, aucun secret recopié', async () => {
+  const sortie = await executerDansImage(image, String.raw`
+    set -e
+    export HOME=/tmp
+    mkdir -p /workspace/projet && cd /workspace/projet
+    git init -q && git config user.email t@t && git config user.name t
+    echo base > README.md && echo ancien > supprime.txt && git add . && git commit -qm base
+    BASE=$(git rev-parse HEAD)
+    # Le dépôt tente de masquer ses constats : nosemgrep, .semgrepignore, gitleaks:allow, .gitleaks.toml, .gitleaksignore.
+    printf 'using System;
+using System.Text.RegularExpressions;
+public static class Motifs {
+  public static Regex Creer(string m) => new Regex(m, RegexOptions.None, TimeSpan.InfiniteMatchTimeout); // nosemgrep
+}
+' > ./-Motifs.cs
+    printf '*.cs
+' > .semgrepignore
+    mkdir config && printf 'aws_access_key_id = AKIAQ3EGRT7NMZ5WXPLA # gitleaks:allow
+' > config/aws.env
+    printf '[allowlist]
+paths = ["config/"]
+' > .gitleaks.toml
+    git rm -q supprime.txt && git add . && git commit -qm fuite
+    echo "$(git rev-parse HEAD):config/aws.env:aws-access-token:1" > .gitleaksignore && git add . && git commit -qm ignore
+    set +e
+    /opt/analyse/analyser.sh "$BASE"; echo "CODE=$?"
+    cd /workspace/analyse
+    echo "SHA-OK=$([ "$(cat sha)" = "$(git -C /workspace/projet rev-parse HEAD)" ] && echo oui)"
+    echo "MODIFIES=$(sort fichiers-modifies | tr '
+' ' ')"
+    echo "NA=$(ls *.na | sort | tr '
+' ' ')"
+    for o in semgrep gitleaks; do echo "$o.code=$(cat $o.code)"; done
+    node -e 'const r=JSON.parse(require("fs").readFileSync("semgrep.json","utf8")).results; console.log("SEMGREP=" + r.map(x => x.path + ":" + x.check_id.split(".").pop()).join(","))'
+    node -e 'const r=JSON.parse(require("fs").readFileSync("gitleaks.json","utf8")); console.log("GITLEAKS=" + r.map(x => x.File + ":" + x.RuleID + ":" + x.StartLine).join(","))'
+    echo "FUITE=$(grep -l AKIAQ3EGRT7NMZ5WXPLA gitleaks.json gitleaks.log semgrep.json 2>/dev/null | tr '
+' ' ')"
+    /opt/analyse/analyser.sh 0123456789abcdef0123456789abcdef01234567; echo "BASE-ABSENTE=$? $(ls /workspace/analyse | wc -l)"
+    /opt/analyse/analyser.sh 'HEAD~1'; echo "BASE-INVALIDE=$? $(ls /workspace/analyse | wc -l)"
+  `, { '/workspace': 'rw,exec,uid=1000,gid=1000,size=256m' });
+  const ligne = (cle: string) => sortie.match(new RegExp(`^${cle}=(.*)$`, 'm'))?.[1]?.trim();
+  assert.equal(ligne('CODE'), '0', sortie);
+  assert.equal(ligne('SHA-OK'), 'oui', sortie);
+  assert.equal(ligne('MODIFIES'), '-Motifs.cs .gitleaks.toml .gitleaksignore .semgrepignore config/aws.env', 'fichiers supprimés exclus');
+  assert.equal(ligne('NA'), 'audit_dotnet.na audit_npm.na tests_angular.na tests_dotnet.na');
+  assert.equal(ligne('semgrep.code'), '0', sortie);
+  assert.equal(ligne('gitleaks.code'), '0', sortie);
+  assert.equal(ligne('SEMGREP'), '-Motifs.cs:regular-expression-dos-infinite-timeout', 'nosemgrep et .semgrepignore sans effet');
+  assert.equal(ligne('GITLEAKS'), 'config/aws.env:aws-access-token:1', 'gitleaks:allow, .gitleaks.toml et .gitleaksignore sans effet');
+  assert.equal(ligne('FUITE'), '', 'aucune valeur de secret dans les rapports');
+  assert.equal(ligne('BASE-ABSENTE'), '3 0', 'base absente : arrêt, aucun résultat');
+  assert.equal(ligne('BASE-INVALIDE'), '3 0', 'base non hexadécimale : arrêt, aucun résultat');
 });
