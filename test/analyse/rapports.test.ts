@@ -95,3 +95,41 @@ test('Semgrep : erreurs d\'analyse = mesure incomplète', () => {
   assert.equal(lireSemgrep('{"results":[],"errors":[{"code":3,"message":"Timeout"}]}'), null);
   assert.deepEqual(lireSemgrep('{"results":[],"errors":[]}'), []);
 });
+
+test('TRX : erreurs, délais et abandons comptent comme échecs', () => {
+  assert.deepEqual(lireTrx('<Counters total="5" failed="0" error="1" timeout="1" aborted="0" />'), { total: 5, echecs: 2 });
+  assert.deepEqual(lireTrx('<Counters total="5" failed="1" aborted="3" />'), { total: 5, echecs: 4 });
+});
+
+test('sévérité inconnue ou absente : haute, sans « undefined »', () => {
+  const npm = lireNpmAudit('{"vulnerabilities":{"x":{"name":"x"},"y":{"severity":"bizarre"}}}')!;
+  assert.deepEqual(npm.map(c => c.severite), ['haute', 'haute']);
+  assert.ok(npm.every(c => !c.message.includes('undefined')));
+  assert.equal(npm[0].message, 'x : vulnérabilité inconnue');
+  const net = lireDotnetVulnerables('{"projects":[{"frameworks":[{"topLevelPackages":[{"id":"P","resolvedVersion":"1","vulnerabilities":[{}]}]}]}]}')!;
+  assert.deepEqual(net.map(c => [c.severite, c.message]), [['haute', 'P 1 : vulnérabilité inconnue']]);
+  const sg = lireSemgrep('{"results":[{"check_id":"r","path":"a.cs","start":{"line":1},"extra":{"message":"m"}}]}')!;
+  assert.equal(sg[0].severite, 'haute');
+});
+
+test('éléments non objets : null, jamais d\'exception', () => {
+  assert.equal(lireGitleaks('[null]'), null);
+  assert.equal(lireGitleaks('["x"]'), null);
+  assert.equal(lireSemgrep('{"results":[null]}'), null);
+  assert.equal(lireNpmAudit('{"vulnerabilities":{"x":null}}'), null);
+  assert.equal(lireDotnetVulnerables('{"projects":[null]}'), null);
+  assert.equal(lireDotnetVulnerables('{"projects":[{"frameworks":[null]}]}'), null);
+  assert.equal(lireDotnetVulnerables('{"projects":[{"frameworks":[{"topLevelPackages":[null]}]}]}'), null);
+  assert.equal(lireDotnetVulnerables('{"projects":[{"frameworks":[{"topLevelPackages":[{"id":"P","vulnerabilities":[null]}]}]}]}'), null);
+});
+
+test('gitleaks : RuleID, File ou StartLine manquant = illisible', () => {
+  assert.equal(lireGitleaks('[{"File":"a","StartLine":1}]'), null);
+  assert.equal(lireGitleaks('[{"RuleID":"r","StartLine":1}]'), null);
+  assert.equal(lireGitleaks('[{"RuleID":"r","File":"a"}]'), null);
+});
+
+test('dotnet : problems non vide = mesure incomplète', () => {
+  assert.equal(lireDotnetVulnerables('{"projects":[],"problems":[{"level":"error","text":"échec"}]}'), null);
+  assert.deepEqual(lireDotnetVulnerables('{"projects":[],"problems":[]}'), []);
+});
