@@ -78,10 +78,13 @@ export async function avancer(deps: DepsPipeline, tacheId: string): Promise<Tach
     if (etape === 'qa') criteresQa = lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? '');
     const relais = RELAIS[etape];
     if (relais && tache.reprise === null) {
+      const documents = documentsEtape(db, cle, tache);
+      // L'analyse de review est produite pendant l'étape : celle qui existe déjà vient d'un cycle précédent.
+      if (etape === 'review') delete documents.analyse;
       const c = await deps.controler({
         tache: { id: tache.id, titre: tache.titre }, relais,
         criteresValides: lireCriteres(lireArtefact(db, cle, tacheId, 'criteres')?.contenu ?? ''),
-        documents: documentsEtape(db, cle, tache),
+        documents,
         journal: lireJournal(db, tacheId).slice(-50).map(e => ({ commande: e.commande, decision: e.decision, raison: e.raison })),
       });
       if (c.coutUsd > 0) ajouterDepense(db, tacheId, c.coutUsd);

@@ -297,6 +297,18 @@ test('review : copie du reviewer à un autre SHA que l’analyse = pause d’int
   assert.equal(lireJournal(db, 'T-41').at(-1)?.decideur, 'Contrôleur d’intégrité');
 });
 
+test('review d’un nouveau cycle : l’analyse du cycle précédent n’est pas transmise au contrôle du relais', async () => {
+  const { db, deps, appels, controles } = banc([{ rapport: 'RAS' }]);
+  aEtape(db, 'review');
+  enregistrerArtefact(db, cle, 'T-41', 'analyse', JSON.stringify({ ...ANALYSE_VERTE, tests: { total: 99, echecs: 3 } }));
+  await avancer(deps, 'T-41');
+  assert.equal(controles[0].relais, 'Implémentation → Review');
+  assert.ok(!('analyse' in controles[0].documents), 'analyse périmée exclue du contrôle');
+  const courante = lireArtefact(db, cle, 'T-41', 'analyse')!.contenu;
+  assert.equal(JSON.parse(courante).tests.total, 12);
+  assert.ok(appels[0].prompt.includes(JSON.stringify(courante).slice(1, -1)) && !appels[0].prompt.includes('99'), 'le reviewer reçoit l’analyse du cycle courant');
+});
+
 test('review sans commit de base : étape bloquée, aucun agent', async () => {
   const { db, deps, appels } = banc([], { base: null });
   aEtape(db, 'review');
