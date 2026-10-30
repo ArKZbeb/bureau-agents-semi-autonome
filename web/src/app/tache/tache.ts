@@ -4,6 +4,7 @@ import { ApiService } from '../api';
 import { LIBELLE_ETAPE, budget, eur, essai, heure, qui } from '../libelles';
 import type { EntreeJournal, FicheTache, NomAction, Tache, TypeDocument } from '../modeles';
 import { RapportVue } from './rapport';
+import { ValidationVue } from './validation';
 
 const DOCUMENTS: { type: TypeDocument; titre: string }[] = [
   { type: 'demande', titre: 'Demande' }, { type: 'spec', titre: 'spec.md' }, { type: 'criteres', titre: 'Critères' }, { type: 'plan', titre: 'plan.md' },
@@ -15,7 +16,7 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
 
 @Component({
   selector: 'app-tache',
-  imports: [RouterLink, RapportVue],
+  imports: [RouterLink, RapportVue, ValidationVue],
   template: `
     @if (fiche(); as f) {
       <section class="ecran">
@@ -24,6 +25,7 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
         <p class="doux">{{ etape(f.tache) }} · {{ qui(f.tache) }} @if (essai(f.tache)) { · {{ essai(f.tache) }} } · {{ budget(f.tache) }}</p>
         @if (erreurChargement(); as e) { <p class="alerte">{{ e }}</p> }
         @if (erreur(); as e) { <p class="alerte">{{ e }}</p> }
+        @if (bloc() !== 'validation' && succes(); as m) { <p class="go">{{ m }}</p> }
         @if (f.anomalie; as a) {
           <p class="alerte anomalie">Anomalie d'intégrité : {{ a }} <button (click)="recharger()">Recharger</button></p>
         }
@@ -79,7 +81,7 @@ type Bloc = 'questions' | 'proposition' | 'arbitrage' | 'budget' | 'reprise' | '
               </div>
             }
             @case ('validation') {
-              <div class="bloc"><p>Prête pour ta validation : la boîte de validation arrive en phase 3.</p></div>
+              <app-validation [id]="id()" [fiche]="f" [journal]="journal()" (fait)="succes.set($event); recharger()" />
             }
           }
           <nav class="onglets">
@@ -128,6 +130,7 @@ export class TacheVue implements OnDestroy {
   protected readonly erreur = signal<string | null>(null);
   protected readonly envoi = signal(false);
   protected readonly reponse = signal('');
+  protected readonly succes = signal<string | null>(null);
   protected readonly onglet = signal<'documents' | 'rapport' | 'activite'>('documents');
   private minuteur: ReturnType<typeof setInterval> | undefined;
   private enCours = false;
@@ -167,7 +170,7 @@ export class TacheVue implements OnDestroy {
     effect(() => {
       this.id();
       untracked(() => {
-        this.fiche.set(null); this.journal.set([]); this.reponse.set(''); this.erreur.set(null); this.erreurChargement.set(null);
+        this.fiche.set(null); this.journal.set([]); this.reponse.set(''); this.succes.set(null); this.erreur.set(null); this.erreurChargement.set(null);
         void this.charger(true);
       });
     });

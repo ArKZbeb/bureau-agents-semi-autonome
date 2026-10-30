@@ -36,3 +36,7 @@ export const heure = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '--:--' : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+
+/** Tâche qui attend ma validation finale ou qui est bloquée : compte de la pastille « Mon bureau ». */
+export const aValider = (t: Tache) => t.statut === 'attente_humain' && t.etape === 'validation';
+export const aTraiter = (t: Tache) => aValider(t) || t.statut === 'bloquee';

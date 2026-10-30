@@ -9,7 +9,7 @@ import { EtatBureau } from './etat';
 describe('App', () => {
   const api = { arretGlobal: vi.fn(), repriseGlobale: vi.fn() };
   const etat = {
-    escalades: signal([]), etat: signal({ ordonnanceur: 'actif' }), erreur: signal<string | null>(null), sessionExpiree: signal(false),
+    escalades: signal([]), taches: signal<unknown[]>([]), etat: signal({ ordonnanceur: 'actif' }), erreur: signal<string | null>(null), sessionExpiree: signal(false),
     demarrer: vi.fn(), arreter: vi.fn(), rafraichir: vi.fn(),
   };
 
@@ -27,7 +27,7 @@ describe('App', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    etat.etat.set({ ordonnanceur: 'actif' }); etat.erreur.set(null); etat.sessionExpiree.set(false);
+    etat.taches.set([]); etat.etat.set({ ordonnanceur: 'actif' }); etat.erreur.set(null); etat.sessionExpiree.set(false);
     api.arretGlobal.mockResolvedValue({});
     etat.rafraichir.mockResolvedValue(undefined);
   });
@@ -36,6 +36,22 @@ describe('App', () => {
     const el = creer('');
     expect(el.querySelector('h1')?.textContent).toContain('Jeton de session manquant');
     expect(etat.demarrer).not.toHaveBeenCalled();
+  });
+
+  it('Mon bureau : pastille = tâches à valider + bloquées', () => {
+    etat.taches.set([
+      { id: 'T-1', statut: 'attente_humain', etape: 'validation' }, { id: 'T-2', statut: 'bloquee', etape: 'qa' },
+      { id: 'T-3', statut: 'attente_humain', etape: 'cadrage' }, { id: 'T-4', statut: 'en_cours', etape: 'review' },
+    ]);
+    const el = creer('jeton');
+    const lien = el.querySelector('a[href="/bureau"]')!;
+    expect(lien.textContent).toContain('Mon bureau');
+    expect(lien.querySelector('.pastille')?.textContent).toBe('2');
+  });
+
+  it('Mon bureau : pas de pastille sans tâche à traiter', () => {
+    const el = creer('jeton');
+    expect(el.querySelector('a[href="/bureau"] .pastille')).toBeNull();
   });
 
   it('arrêt global : annuler n’appelle rien, confirmer appelle une fois', async () => {

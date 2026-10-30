@@ -35,4 +35,11 @@ export type Verdict = {
 };
 export type IntegriteJournal = { intacte: boolean; entrees: number; erreur?: string };
 export type EtatGlobal = { ordonnanceur: 'actif' | 'suspendu' };
-export type NomAction = 'reponse' | 'validation-cadrage' | 'arbitrage' | 'budget' | 'reprise';
+export type NomAction = 'reponse' | 'validation-cadrage' | 'arbitrage' | 'budget' | 'reprise' | 'recuperation' | 'pr' | 'renvoi' | 'relance' | 'abandon';
+export type FichierModifie = { fichier: string; ajouts: number | null; suppressions: number | null };
+export type DossierValidation = {
+  branche: string; sha: string; commits: number; fichiers: FichierModifie[]; diff: string; tronque: boolean;
+  integrite: { verifiee: true } | { verifiee: false; raison: string };
+  journal: { commandes: number; refus: number; escalades: number };
+};
+export type EntreeHistorique = { creeLe: string; verdict: 'go' | 'no_go'; regles: string[]; criteresNonRemplis: { numero: number; preuve: string }[] };

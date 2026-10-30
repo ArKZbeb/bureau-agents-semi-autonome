@@ -19,7 +19,7 @@ const entree = (id: number, o: Partial<EntreeJournal> = {}): EntreeJournal => ({
 });
 
 describe('TacheVue', () => {
-  const api = { tache: vi.fn(), journal: vi.fn(), action: vi.fn() };
+  const api = { tache: vi.fn(), journal: vi.fn(), action: vi.fn(), validation: vi.fn() };
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     vi.resetAllMocks();
@@ -127,10 +127,18 @@ describe('TacheVue', () => {
     expect(bouton('Reprendre')).toBeUndefined();
   });
 
-  it('validation en attente : message de phase 3 et documents', async () => {
-    const { texte } = await ouvrir(fiche({ etape: 'validation' }, { documents: docs({ resume: 'Résumé de fin' }) }));
-    expect(texte()).toContain('Prête pour ta validation : la boîte de validation arrive en phase 3.');
+  it('validation en attente : la boîte de validation est chargée une seule fois malgré l’interrogation', async () => {
+    api.validation.mockResolvedValue({
+      branche: 'tache/T-41', sha: 'a'.repeat(40), commits: 2, fichiers: [], diff: '', tronque: false, integrite: { verifiee: true }, journal: { commandes: 0, refus: 0, escalades: 0 },
+    });
+    const { texte, fx, attendre } = await ouvrir(fiche({ etape: 'validation' }, { documents: docs({ resume: 'Résumé de fin' }) }));
+    expect(texte()).toContain('Intégrité vérifiée');
     expect(texte()).toContain('Résumé de fin');
+    vi.advanceTimersByTime(3000); await attendre();
+    vi.advanceTimersByTime(3000); await attendre();
+    expect(api.tache.mock.calls.length).toBeGreaterThan(2);
+    expect(api.validation).toHaveBeenCalledTimes(1);
+    fx.destroy();
   });
 
   it('une erreur 409 de l’action s’affiche telle quelle', async () => {

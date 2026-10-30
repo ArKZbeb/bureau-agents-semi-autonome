@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Injectable, InjectionToken, inject } from '@angular/core';
 import { firstValueFrom, type Observable } from 'rxjs';
-import type { Detection, EntreeJournal, Escalade, EtatGlobal, FicheTache, IntegriteJournal, NomAction, Projet, Tache } from './modeles';
+import type { Detection, DossierValidation, EntreeHistorique, EntreeJournal, Escalade, EtatGlobal, FicheTache, IntegriteJournal, NomAction, Projet, Tache } from './modeles';
 
 export const JETON = new InjectionToken<string>('jeton de session');
 
@@ -29,7 +29,11 @@ export class ApiService {
   taches() { return this.get<Tache[]>('/api/taches'); }
   tache(id: string) { return this.get<FicheTache>(`/api/taches/${encodeURIComponent(id)}`); }
   creerTache(t: { projet: string; titre: string; demande: string }) { return this.post<Tache>('/api/taches', t); }
-  action(id: string, nom: NomAction, corps: Record<string, unknown>) { return this.post<Tache>(`/api/taches/${encodeURIComponent(id)}/${nom}`, corps); }
+  validation(id: string) { return this.get<DossierValidation>(`/api/taches/${encodeURIComponent(id)}/validation`); }
+  historique(id: string) { return this.get<EntreeHistorique[]>(`/api/taches/${encodeURIComponent(id)}/historique`); }
+  action(id: string, nom: 'pr', corps: Record<string, unknown>): Promise<{ tache: Tache; url: string }>;
+  action(id: string, nom: NomAction, corps: Record<string, unknown>): Promise<Tache>;
+  action(id: string, nom: NomAction, corps: Record<string, unknown>): Promise<Tache | { tache: Tache; url: string }> { return this.post<Tache | { tache: Tache; url: string }>(`/api/taches/${encodeURIComponent(id)}/${nom}`, corps); }
   projets() { return this.get<Projet[]>('/api/projets'); }
   detecter(chemin: string) { return this.post<Detection>('/api/projets/detection', { chemin }); }
   relier(p: { nom: string; chemin: string; budgetUsd: number; couvertureLignes: number }) { return this.post<Projet>('/api/projets', p); }

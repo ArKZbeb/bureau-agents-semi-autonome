@@ -1,7 +1,8 @@
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { ApiService, JETON } from './api';
 import { EtatBureau } from './etat';
+import { aTraiter } from './libelles';
 
 @Component({
   selector: 'app-root',
@@ -17,6 +18,9 @@ import { EtatBureau } from './etat';
         <strong>Bureau d'agents</strong>
         <nav>
           <a routerLink="/" routerLinkActive="actif" [routerLinkActiveOptions]="{ exact: true }">Hall d'entrée</a>
+          <a routerLink="/bureau" routerLinkActive="actif">Mon bureau
+            @if (nombreATraiter(); as n) { <span class="pastille">{{ n }}</span> }
+          </a>
           <a routerLink="/securite" routerLinkActive="actif">Poste de sécurité
             @if (etat.escalades().length) { <span class="pastille">{{ etat.escalades().length }}</span> }
           </a>
@@ -52,6 +56,7 @@ export class App implements OnInit, OnDestroy {
   protected readonly jeton = inject(JETON);
   protected readonly etat = inject(EtatBureau);
   private readonly api = inject(ApiService);
+  protected readonly nombreATraiter = computed(() => this.etat.taches().filter(aTraiter).length);
   protected readonly confirmation = signal<'arret' | 'reprise' | null>(null);
 
   ngOnInit() { if (this.jeton) this.etat.demarrer(); }
