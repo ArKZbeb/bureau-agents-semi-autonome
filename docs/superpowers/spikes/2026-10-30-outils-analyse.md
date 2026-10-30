@@ -355,8 +355,8 @@ Quand un projet n'a aucune vulnérabilité, **`frameworks` est absent**. Quand i
 - **E20 (Task 2, gitleaks lit le `.gitleaksignore` du dossier courant).** En plus de celui du dossier analysé,
   gitleaks charge le `.gitleaksignore` du **répertoire courant** (constaté en Task 2). Lancé depuis
   `/workspace/projet`, il lirait donc le fichier du dépôt même en analysant un clone `--no-checkout` (E9).
-  `analyser.sh` lance désormais gitleaks depuis `$HOME` (`/workspace/.analyse-home`, qui ne contient pas de
-  `.gitleaksignore`) : `( cd "$HOME" && gitleaks git "$CLONE" … )`. Dans le test E9 du spike, gitleaks avait été
+  `mesurer.sh` (E21) lance donc gitleaks depuis `$HOME` (`/tmp/mesures-home`, vidé au début de chaque mesure et
+  qui ne contient pas de `.gitleaksignore`) : `( cd "$HOME" && gitleaks git "$CLONE" … )`. Dans le test E9 du spike, gitleaks avait été
   lancé depuis `/tmp`, ce qui explique que l'effet n'avait pas été vu.
 - **E21 (Tasks 2 et 9, analyse en deux conteneurs).** Dans un seul conteneur, le code testé (`dotnet test`,
   `ng test`, `karma.conf.js` ou MSBuild du dépôt) tourne sous le même uid que Semgrep, gitleaks, le diff et les
@@ -379,8 +379,15 @@ Quand un projet n'a aucune vulnérabilité, **`frameworks` est absent**. Quand i
   `/mesures/*` et `/workspace/analyse/semgrep.json`, et les empreintes de `/mesures` restent identiques.
   Mesures également protégées des configurations du dépôt :
   - `npm audit` impose `npm_config_registry=https://registry.npmjs.org/` et `npm_config_include=dev,optional,peer`
-    par variables d'environnement, qui priment sur le `.npmrc` du projet. Vérifié : avec un `.npmrc` qui détourne
-    le registre, l'erreur hors ligne cite toujours `registry.npmjs.org`.
+    par variables d'environnement. Il tourne dans un dossier vide de `/tmp`, où seuls `package.json` et
+    `package-lock.json` sont copiés (fichiers ordinaires, pas de liens). Le `.npmrc` du dépôt est ainsi écarté : sans
+    cette copie, `package-lock=false` (l'arbre est reconstruit depuis `package.json`) ou `workspace=x` (un seul
+    espace de travail audité) changeaient l'arbre audité, ce que les variables d'environnement n'empêchent pas.
+    Vérifié hors ligne : avec chacun de ces `.npmrc`, l'audit échoue toujours sur la requête
+    `registry.npmjs.org/-/npm/v1/security/advisories/bulk` du verrou.
+  - `fichiers-modifies` sépare les chemins par NUL (`git diff --name-only -z`). Semgrep les reçoit tels quels
+    (`mapfile -d ''`). La recherche des cibles lit aussi `find -printf '%d %p\0'` par NUL. Les lectures git se font
+    avec `GIT_NO_REPLACE_OBJECTS=1`.
   - `dotnet list package --vulnerable` reçoit `--source https://api.nuget.org/v3/index.json`.
   - Semgrep reçoit `--max-target-bytes 0` : il écartait les fichiers de plus de 1 Mo.
   Choix des cibles : la solution ou le projet .NET, et l'`angular.json`, sont pris au niveau le moins profond. S'il

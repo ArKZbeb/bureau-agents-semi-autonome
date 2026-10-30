@@ -18,12 +18,11 @@ na() { : > "$SORTIE/$1.na"; }
 
 # Fichier le moins profond qui répond aux critères find (CIBLE) ; 1 : aucun ; 2 : plusieurs à cette profondeur.
 cible_unique() {
-  local lignes min
-  lignes=$(find . \( -name node_modules -o -name .git \) -prune -o -type f \( "$@" \) -printf '%d %p\n' | sort -n)
-  [ -n "$lignes" ] || return 1
-  min=${lignes%% *}
-  [ "$(grep -c "^$min " <<< "$lignes")" -eq 1 ] || return 2
-  CIBLE=${lignes#* }; CIBLE=${CIBLE%%$'\n'*}
+  local -a lignes=()
+  mapfile -d '' -t lignes < <(find . \( -name node_modules -o -name .git \) -prune -o -type f \( "$@" \) -printf '%d %p\0' | sort -z -n)
+  [ ${#lignes[@]} -gt 0 ] || return 1
+  [ ${#lignes[@]} -eq 1 ] || [ "${lignes[1]%% *}" != "${lignes[0]%% *}" ] || return 2
+  CIBLE=${lignes[0]#* }
 }
 
 # .NET : la solution la moins profonde, sinon le projet le moins profond ; ambiguïté = mesure manquante.

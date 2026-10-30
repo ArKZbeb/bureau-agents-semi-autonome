@@ -11,6 +11,8 @@ export HOME=/tmp/mesures-home npm_config_cache=/tmp/mesures-home/npm npm_config_
 # Variables d'environnement : elles priment sur le .npmrc du dépôt (registre détourné, dépendances omises).
 export npm_config_registry=https://registry.npmjs.org/ npm_config_include=dev,optional,peer
 export SEMGREP_ENABLE_VERSION_CHECK=0 SEMGREP_SEND_METRICS=off
+# Les objets de remplacement (refs/replace) ne réécrivent pas l'historique lu par git.
+export GIT_NO_REPLACE_OBJECTS=1
 # Résultats précédents effacés d'abord : un arrêt prématuré ne laisse aucune mesure périmée.
 [ -d "$SORTIE" ] && find "$SORTIE" -mindepth 1 -delete || exit 3
 rm -rf "$HOME" && mkdir -p "$HOME" || exit 3
@@ -23,28 +25,35 @@ git cat-file -e "$BASE^{commit}" 2>/dev/null || { echo "commit de base absent" >
 git rev-parse HEAD > "$SORTIE/sha" || exit 3
 # --text et sans pilote : un attribut « -diff » ou « binary » du dépôt ne cache pas de lignes modifiées.
 git diff -U0 --text --no-ext-diff --no-textconv "$BASE..HEAD" > "$SORTIE/diff.patch" || exit 3
-git -c core.quotePath=false diff --name-only --diff-filter=d "$BASE..HEAD" > "$SORTIE/fichiers-modifies" || exit 3
+# Chemins séparés par NUL : aucun nom de fichier n'est re-cité ni coupé.
+git diff --name-only -z --diff-filter=d "$BASE..HEAD" > "$SORTIE/fichiers-modifies" || exit 3
 
 code() { echo "$2" > "$SORTIE/$1.code"; }
 na() { : > "$SORTIE/$1.na"; }
 
 # Fichier le moins profond qui répond aux critères find (CIBLE) ; 1 : aucun ; 2 : plusieurs à cette profondeur.
 cible_unique() {
-  local lignes min
-  lignes=$(find . \( -name node_modules -o -name .git \) -prune -o -type f \( "$@" \) -printf '%d %p\n' | sort -n)
-  [ -n "$lignes" ] || return 1
-  min=${lignes%% *}
-  [ "$(grep -c "^$min " <<< "$lignes")" -eq 1 ] || return 2
-  CIBLE=${lignes#* }; CIBLE=${CIBLE%%$'\n'*}
+  local -a lignes=()
+  mapfile -d '' -t lignes < <(find . \( -name node_modules -o -name .git \) -prune -o -type f \( "$@" \) -printf '%d %p\0' | sort -z -n)
+  [ ${#lignes[@]} -gt 0 ] || return 1
+  [ ${#lignes[@]} -eq 1 ] || [ "${lignes[1]%% *}" != "${lignes[0]%% *}" ] || return 2
+  CIBLE=${lignes[0]#* }
 }
 
-# npm audit du projet Angular : lit package-lock.json seulement, sans npm ci ni script.
+# npm audit du projet Angular : package.json et package-lock.json seuls, copiés dans un dossier vide (aucun .npmrc
+# ni autre fichier du dépôt : package-lock=false ou workspace= changeraient l'arbre audité), sans npm ci ni script.
 cible_unique -name angular.json
 case $? in
   1) na audit_npm ;;
   2) echo "plusieurs angular.json à la même profondeur" > "$SORTIE/npm-audit.log"; code audit_npm 3 ;;
   *)
-    ( cd "$(dirname "$CIBLE")" && timeout 600 npm audit --json > "$SORTIE/npm-audit.json" 2> "$SORTIE/npm-audit.log" )
+    DOSSIER=$(dirname "$CIBLE") AUDIT="$HOME/npm-audit"
+    mkdir -p "$AUDIT"
+    for f in package.json package-lock.json; do
+      # Fichiers ordinaires seulement : un lien pourrait désigner n'importe quoi.
+      [ -f "$DOSSIER/$f" ] && [ ! -L "$DOSSIER/$f" ] && cp -- "$DOSSIER/$f" "$AUDIT/$f"
+    done
+    ( cd "$AUDIT" && timeout 600 npm audit --json > "$SORTIE/npm-audit.json" 2> "$SORTIE/npm-audit.log" )
     # npm audit renvoie 1 avec des vulnérabilités comme en erreur (réseau, lockfile absent) : seul un rapport
     # avec un objet « vulnerabilities » et sans « error » est une mesure.
     node -e '
@@ -58,7 +67,7 @@ esac
 # résultat (pas de --error) ; --disable-nosem : un commentaire « nosemgrep » du dépôt ne masque rien ;
 # --max-target-bytes 0 : aucun fichier écarté pour sa taille ; les fichiers passés explicitement ignorent
 # .semgrepignore ; « -- » : un nom de fichier n'est jamais une option.
-mapfile -t FICHIERS < "$SORTIE/fichiers-modifies"
+mapfile -d '' -t FICHIERS < "$SORTIE/fichiers-modifies"
 if [ ${#FICHIERS[@]} -gt 0 ]; then
   timeout 900 semgrep scan --config /opt/analyse/semgrep-regles.yml --json --metrics=off --disable-version-check --disable-nosem \
     --max-target-bytes 0 --output "$SORTIE/semgrep.json" -- "${FICHIERS[@]}" > "$SORTIE/semgrep.log" 2>&1

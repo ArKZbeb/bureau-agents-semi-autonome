@@ -192,7 +192,7 @@ test('mesures : base vérifiée, constats que le dépôt ne peut pas masquer, au
     /opt/analyse/mesurer.sh "$BASE"; echo "CODE=$?"
     cd /mesures
     echo "SHA-OK=$([ "$(cat sha)" = "$(git -C /workspace/projet rev-parse HEAD)" ] && echo oui)"
-    echo "MODIFIES=$(sort fichiers-modifies | tr '\n' ' ')"
+    echo "MODIFIES=$(tr '\0' '\n' < fichiers-modifies | sort | tr '\n' ' ')"
     for o in semgrep gitleaks audit_npm; do echo "$o.code=$(cat $o.code)"; done
     node -e 'const r=JSON.parse(require("fs").readFileSync("semgrep.json","utf8")).results; console.log("SEMGREP=" + r.map(x => x.path + ":" + x.check_id.split(".").pop()).sort().join(","))'
     node -e 'const r=JSON.parse(require("fs").readFileSync("gitleaks.json","utf8")); console.log("GITLEAKS=" + r.map(x => x.File + ":" + x.RuleID + ":" + x.StartLine).sort().join(","))'
@@ -215,6 +215,26 @@ test('mesures : base vérifiée, constats que le dépôt ne peut pas masquer, au
   assert.equal(valeur(sortie, 'FUITE'), '', 'aucune valeur de secret dans les rapports');
   assert.equal(valeur(sortie, 'BASE-ABSENTE'), '3 0', 'base absente : arrêt, aucun résultat');
   assert.equal(valeur(sortie, 'BASE-INVALIDE'), '3 0', 'base non hexadécimale : arrêt, aucun résultat');
+});
+
+test('npm audit : le .npmrc du dépôt ne change pas l’audit du verrou', async () => {
+  // Hors réseau, l'audit normal du verrou échoue sur la requête « advisories/bulk » ; un .npmrc qui détourne le
+  // registre, désactive le verrou ou restreint l'audit à un espace de travail produirait une autre requête ou erreur.
+  const sortie = await executerDansImage(image, INIT_DEPOT + String.raw`
+    BASE=$(cat /workspace/base)
+    mkdir front && echo '{"projects":{}}' > front/angular.json
+    echo '{"name":"f","version":"1.0.0","dependencies":{"lodash":"4.17.20"}}' > front/package.json
+    echo '{"name":"f","version":"1.0.0","lockfileVersion":3,"requires":true,"packages":{"":{"name":"f","version":"1.0.0","dependencies":{"lodash":"4.17.20"}},"node_modules/lodash":{"version":"4.17.20","resolved":"https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz"}}}' > front/package-lock.json
+    git add . && git commit -qm front
+    set +e
+    for npmrc in 'registry=https://detourne.invalid/' 'package-lock=false' 'workspace=x'; do
+      printf '%s\n' "$npmrc" > front/.npmrc && git add . && git commit -qm npmrc
+      /opt/analyse/mesurer.sh "$BASE" > /dev/null 2>&1
+      echo "NPMRC $npmrc=$(cat /mesures/audit_npm.code) $(node -e 'const j=JSON.parse(require("fs").readFileSync("/mesures/npm-audit.json","utf8")); console.log(/^request to https:\/\/registry\.npmjs\.org\/-\/npm\/v1\/security\/advisories\/bulk failed/.test(j.message ?? ""))')"
+    done
+  `, { ...WORKSPACE_TMPFS, ...MESURES_TMPFS });
+  for (const npmrc of ['registry=https://detourne.invalid/', 'package-lock=false', 'workspace=x'])
+    assert.equal(valeur(sortie, `NPMRC ${npmrc}`), '1 true', `${npmrc} : audit du verrou sur le registre officiel\n${sortie}`);
 });
 
 test('cibles ambiguës ou refusées : mesure manquante', async () => {
